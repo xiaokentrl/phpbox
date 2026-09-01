@@ -69,8 +69,9 @@ load_env() {
   # PHP 缺省安装的扩展集（php install 不带 --extensions 时生效）。
   # curl/openssl/mbstring/pdo/sqlite3/xml/xmlwriter/xmlreader/simplexml/dom/fileinfo
   # 以及 sodium/pcntl/posix 等已编译进 php-fpm-alpine 镜像，无需也不能重复安装；
-  # mongodb/memcached/sqlsrv/ldap 等低频扩展按需 extension add，不进默认集
-  PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,apcu,xdebug}"
+  # mongodb/memcached/sqlsrv/ldap 等低频扩展按需 extension add，不进默认集。
+  # apcu 钉 5.1.27：5.1.28 在 pecl 的 REST 依赖元数据缺失导致安装必败，上游修复后可改回
+  PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,apcu-5.1.27,xdebug}"
 
   export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在

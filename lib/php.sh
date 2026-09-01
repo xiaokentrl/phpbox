@@ -29,8 +29,9 @@ _php_validate_extensions() {
   local exts="$1"
   local IFS=,   # 把分词符设为逗号：下面的 for 直接按逗号逐项遍历 $exts
   for ext in $exts; do
-    # 白名单字符集：扩展名会被拼进镜像 tag 和 Dockerfile，禁止空格/分号等注入字符
-    if ! [[ "$ext" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    # 白名单字符集：扩展名会被拼进 Dockerfile，禁止空格/分号等注入字符。
+    # 允许点号：install-php-extensions 的版本钉住语法（如 apcu-5.1.27）需要
+    if ! [[ "$ext" =~ ^[a-zA-Z0-9._-]+$ ]]; then
       error "无效扩展名: $ext"
     fi
   done
@@ -91,7 +92,10 @@ _php_generate_compose() {
   local svc_key=$(get_service_key "php" "$ver")
   local yml="$EXT_DIR/php-${ver}.yml"
   local exts="$(_php_read_extensions "$ver")"
-  local image="$(_php_build_image "$ver" "$exts")"
+  # local 与赋值拆开是刻意的：local 会吞掉命令替换的失败状态——镜像构建失败时必须
+  # 让 set -e 在写 yml 之前中止，否则会生成 image 为空的坏 yml（compose 报 "image must be a string"）
+  local image
+  image="$(_php_build_image "$ver" "$exts")"
 
   # yml 里两种 $ 的分工：
   #   \${WWW_ROOT}   保留字面量，由 compose 运行时从 .env 解析（改 .env 即生效，无需重新生成）
