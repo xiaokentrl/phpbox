@@ -1,0 +1,23 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "${NGINX_PORT}:80"
+    volumes:
+      - ${WWW_ROOT}:/var/www:ro
+      - ./config/nginx/alpine/conf.d:/etc/nginx/conf.d:ro
+      - ./config/nginx/alpine/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/sites:/etc/nginx/sites:ro
+      - ./logs/nginx:/var/log/nginx:rw
+    networks:
+      - net
+    restart: unless-stopped
+    labels:
+      - "phpbox-service=nginx"
+      - "phpbox-version=alpine"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
