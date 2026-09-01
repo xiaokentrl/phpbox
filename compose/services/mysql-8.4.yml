@@ -1,0 +1,22 @@
+services:
+  mysql84:
+    image: mysql:8.4
+    container_name: mysql84
+    ports:
+      - "${MYSQL_84_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_84_ROOT_PASSWORD}"
+    volumes:
+      - ${MYSQL_DATA_ROOT}/8.4:/var/lib/mysql
+      - ./config/mysql/8.4/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    networks:
+      - net
+    restart: unless-stopped
+    labels:
+      - "phpbox-service=mysql"
+      - "phpbox-version=8.4"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

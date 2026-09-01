@@ -1,0 +1,4 @@
+networks:
+  net:
+    driver: bridge
+    name: ${NETWORK_NAME:-phpboxnet}
