@@ -153,6 +153,7 @@ _site_add() {
   if [ ! -f "$EXT_DIR/nginx-default.yml" ]; then
     error "Nginx 未安装，请先执行 'phpbox nginx install'"
   fi
+  require_docker
   local php_key=$(get_service_key "php" "$php_ver")
   if ! docker ps --filter "label=${PROJECT_NAME}${LABEL_SEPARATOR}service=php" \
       --filter "label=${PROJECT_NAME}${LABEL_SEPARATOR}version=${php_ver}" --format "{{.Names}}" | grep -q .; then
@@ -213,6 +214,7 @@ _site_switch() {
 
   local conf="$SITES_DIR/${site}.conf"
   [ -f "$conf" ] || error "站点 ${site} 不存在"
+  require_docker
   local php_key=$(get_service_key "php" "$php_ver")
   if ! docker ps --filter "label=${PROJECT_NAME}${LABEL_SEPARATOR}service=php" \
       --filter "label=${PROJECT_NAME}${LABEL_SEPARATOR}version=${php_ver}" --format "{{.Names}}" | grep -q .; then
@@ -254,6 +256,8 @@ _site_remove() {
   [ -z "$site" ] && error "用法: phpbox site remove <域名>"
   local conf="$SITES_DIR/${site}.conf"
   [ -f "$conf" ] || error "站点 ${site} 不存在"
+
+  require_docker
 
   local backup_conf="$SITES_DIR/.backup.$site.conf"
   cp "$conf" "$backup_conf"

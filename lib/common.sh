@@ -161,6 +161,30 @@ check_and_report_port() {
   return 0
 }
 
+# Docker daemon 预检：所有需要与 daemon 交互的变更类命令必须先过这一关。
+# 否则 daemon 未运行时，错误会以"配置验证失败/启动超时"等无关面目出现，极难排查；
+# 更糟的是 nginx install 这类流程会先删旧实例、写 yml，失败后留下半安装状态
+require_docker() {
+  command -v docker &>/dev/null || error "未找到 docker 命令，请先安装 Docker"
+  if ! docker info &>/dev/null; then
+    error "Docker daemon 未运行（无法连接 docker API）。请先启动后重试：
+  Linux:  sudo systemctl start docker
+  其他:   service docker start / 打开 Docker Desktop"
+  fi
+}
+
+# 停止并移除单个服务容器。不能借 compose down 卸载单个服务：down 会连带删除基础
+# compose 文件里定义的共享网络——当其余服务的容器恰好都处于停止/崩溃状态时，网络因
+# 无 endpoint 而被成功删除，之后所有引用旧网络的已停止容器 docker start 一律报
+# "network not found"（重启宿主机也拉不起来），只能逐个 force-recreate 才能恢复。
+# 先 docker stop 走优雅停机（MySQL 的 entrypoint 会清理 socket 并干净关库），
+# docker rm -f 兜底删除已退出或不存在的容器
+stop_and_remove_container() {
+  local cname=$1
+  docker stop "$cname" &>/dev/null || true
+  docker rm -f "$cname" &>/dev/null || true
+}
+
 find_free_port() {
   local start=${1:-80}
   local p=$start
@@ -372,6 +396,8 @@ _generic_service_install() {
     esac
   done
 
+  require_docker
+
   if [ -n "$port" ]; then
     if ! check_and_report_port "$port"; then
       error "端口 $port 不可用"
@@ -398,6 +424,8 @@ _generic_db_port_set() {
   local key; key=$(port_key "$svc" "$ver")
   local old_port; old_port=$(read_env_value "$key" "")
   [ -z "$old_port" ] && error "${svc} ${ver} 未安装或端口未记录"
+
+  require_docker
 
   if ! check_and_report_port "$new_port"; then
     error "端口 ${new_port} 不可用"

@@ -76,6 +76,19 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
 HELPEOF
 }
 
+# Docker daemon 预检：依赖容器运行时的命令先过这一关（实现见 lib/common.sh 的 require_docker）。
+# 不预检的话 daemon 不在场会藏在深处的误导性报错里（如 nginx 的"配置验证失败"），
+# 或产生 uninstall 假成功（compose down 静默失败但 yml 被删）。
+# 豁免：help/hosts（不碰 docker）、site list（纯文件读取）、未知命令（应报"未知命令"而非 docker 错）
+case "${1:-help}" in
+    php|mysql|redis|nginx|backup|restore|list)
+        require_docker
+        ;;
+    site)
+        [ "${2:-}" = "list" ] || require_docker
+        ;;
+esac
+
 case "${1:-help}" in
     php)     shift; cmd_php "$@" ;;
     mysql)   shift; cmd_mysql "$@" ;;

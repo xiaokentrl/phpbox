@@ -98,8 +98,8 @@ _nginx_ensure_running() {
 }
 
 _nginx_remove() {
-  run_compose "nginx" "default" down 2>/dev/null || true
-  docker rm -f nginx 2>/dev/null || true
+  # 只移除 nginx 容器本身，不走 compose down（会误删共享网络，见 common.sh 注释）
+  stop_and_remove_container "nginx"
   rm -f "$EXT_DIR/nginx-default.yml"
 }
 
