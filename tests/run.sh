@@ -87,6 +87,13 @@ assert_contains "nginx: nginx.conf 挂载到 phpbox 内" "$NGINX_CONF" "source: 
 assert_contains "nginx: sites 目录挂载到 phpbox 内" "$NGINX_CONF" "source: $HOME/phpbox/config/nginx/sites"
 assert_contains "nginx: 日志目录挂载到 phpbox 内" "$NGINX_CONF" "source: $HOME/phpbox/logs/nginx"
 
+# PHP Dockerfile 渲染：镜像源/代理支持须落在生成物上
+DOCKERFILE_TXT=$(_php_render_dockerfile 8.4 "gd,redis")
+assert_contains "php: Dockerfile 支持 APK_MIRROR 换源" "$DOCKERFILE_TXT" 'sed -i "s|https://dl-cdn.alpinelinux.org|$APK_MIRROR|g'
+assert_contains "php: Dockerfile 给 PEAR 写入代理配置" "$DOCKERFILE_TXT" 'pear config-set http_proxy'
+assert_contains "php: 扩展列表展开为多参数" "$DOCKERFILE_TXT" "install-php-extensions gd redis"
+assert_contains "php: UID/GID 保持构建时取值" "$DOCKERFILE_TXT" 'usermod -u ${UID}'
+
 # 站点目录必须与 Nginx 版本解耦：换 tag 只换主配置目录，sites 挂载点一字不变
 NGINX_VERSION=1.30
 _nginx_generate_compose
@@ -247,7 +254,9 @@ assert_cmd_error "含空格的版本号被拒" "无效版本号" bash -c "
 if grep -aq "MYSQL_80" "$HOME/phpbox/.env" 2>/dev/null; then bad "被拒版本未在 .env 留脏键"; else ok "被拒版本未在 .env 留脏键"; fi
 OUT=$(bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; load_env; cmd_mysql install 8.0.35" 2>&1) || true
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'
+  _mysql_ensure_running() { :; }   # 桩：禁止测试触碰真实 daemon（会重建生产容器）
+  require_docker() { :; }; load_env; cmd_mysql install 8.0.35" 2>&1) || true
 if echo "$OUT" | grep -q "无效版本号"; then bad "三段版本 8.0.35 不应被拒"; else ok "三段版本 8.0.35 放行"; fi
 
 OUT=$(bash -c "
@@ -258,10 +267,14 @@ if echo "$OUT" | grep -q "无效扩展名"; then ok "含分号扩展名被拒"; 
 # 首装与二装分开进程：error() 会 exit，|| true 拦不住（exit 不是命令失败）
 bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; require_docker() { :; }; load_env; cmd_mysql install 8.0" >/dev/null 2>&1 || true
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'
+  _mysql_ensure_running() { :; }   # 桩：禁止测试触碰真实 daemon
+  require_docker() { :; }; load_env; cmd_mysql install 8.0" >/dev/null 2>&1 || true
 OUT=$(bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; require_docker() { :; }; load_env; cmd_mysql install 8.0" 2>&1) || true
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'
+  _mysql_ensure_running() { :; }   # 桩：禁止测试触碰真实 daemon
+  require_docker() { :; }; load_env; cmd_mysql install 8.0" 2>&1) || true
 if echo "$OUT" | grep -q "已安装"; then ok "重复安装报已安装（幂等）"; else bad "重复安装未拦截: $OUT"; fi
 
 printf 'EQTEST=a=b\n' >> "$HOME/phpbox/.env"
