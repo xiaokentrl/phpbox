@@ -75,6 +75,8 @@ assert_not_contains "php: 渲染结果无 ESC 控制字符（日志不得污染 
 MYSQL_CONF=$(run_compose mysql 8.4 config)
 assert_contains "mysql: MYSQL_DATA_ROOT 来自 .env（可配置）" "$MYSQL_CONF" "source: $HOME/mysql-custom/8.4"
 assert_contains "mysql: my.cnf 挂载到 phpbox 内" "$MYSQL_CONF" "source: $HOME/phpbox/config/mysql/8.4/my.cnf"
+assert_contains "mysql: entrypoint 启动前清理残留 socket" "$MYSQL_CONF" "rm -f /var/lib/mysql/mysql.sock"
+assert_contains "mysql: entrypoint 以 exec 交接保持 PID 1" "$MYSQL_CONF" "exec docker-entrypoint.sh mysqld"
 
 REDIS_CONF=$(run_compose redis 7.4 config)
 assert_contains "redis: 卷名无项目名双重前缀" "$REDIS_CONF" "name: phpbox_redis74_data"
@@ -152,6 +154,14 @@ assert_cmd_error "nginx: 含分号的 NGINX_VERSION 被拒" "无效的 NGINX_VER
 assert_cmd_error "nginx: 含路径穿越的 NGINX_VERSION 被拒" "无效的 NGINX_VERSION" \
   env NGINX_VERSION='../etc' bash -c "source '$ROOT/lib/common.sh'; load_env"
 
+# daemon 未运行时（本沙箱即如此）必须给出明确的启动指引，而不是伪装成"配置验证失败"
+if command -v docker &>/dev/null && ! docker info &>/dev/null; then
+  assert_cmd_error "daemon 未运行时给出明确报错" "Docker daemon 未运行" \
+    bash -c "source '$ROOT/lib/common.sh'; require_docker"
+else
+  echo "  - Docker daemon 运行中，跳过 daemon-down 用例"
+fi
+
 echo "== 2. 站点模板求值 + switch/list 解析 =="
 T=$(mktemp -d)
 site=demo.test
@@ -195,6 +205,7 @@ assert_not_contains "mysql 安装过程不在终端打印密码" "$MYSQL_STDOUT"
 bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; source '$ROOT/lib/mysql.sh'; source '$ROOT/lib/redis.sh'; source '$ROOT/lib/nginx.sh'; source '$ROOT/lib/site.sh'; source '$ROOT/lib/backup.sh'
+  require_docker() { :; }   # 桩：本套件不依赖 daemon，预检放行
   load_env; cmd_backup" >/dev/null 2>&1
 BACKUP_TAR=$(ls "$HOME"/phpbox/backups/backup*.tar.gz 2>/dev/null | head -1)
 if [ -n "$BACKUP_TAR" ]; then
@@ -247,10 +258,10 @@ if echo "$OUT" | grep -q "无效扩展名"; then ok "含分号扩展名被拒"; 
 # 首装与二装分开进程：error() 会 exit，|| true 拦不住（exit 不是命令失败）
 bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; load_env; cmd_mysql install 8.0" >/dev/null 2>&1 || true
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; require_docker() { :; }; load_env; cmd_mysql install 8.0" >/dev/null 2>&1 || true
 OUT=$(bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; load_env; cmd_mysql install 8.0" 2>&1) || true
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; require_docker() { :; }; load_env; cmd_mysql install 8.0" 2>&1) || true
 if echo "$OUT" | grep -q "已安装"; then ok "重复安装报已安装（幂等）"; else bad "重复安装未拦截: $OUT"; fi
 
 printf 'EQTEST=a=b\n' >> "$HOME/phpbox/.env"
@@ -273,12 +284,14 @@ echo "fidelity-probe" > "$HOME/phpbox/state/probe.txt"
 bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; source '$ROOT/lib/mysql.sh'; source '$ROOT/lib/redis.sh'; source '$ROOT/lib/nginx.sh'; source '$ROOT/lib/site.sh'; source '$ROOT/lib/backup.sh'
+  require_docker() { :; }
   load_env; cmd_backup" >/dev/null 2>&1
 rm -f "$HOME/phpbox/.env" "$HOME/phpbox/state/probe.txt"
 TAR2=$(ls "$HOME"/phpbox/backups/backup*.tar.gz 2>/dev/null | sort | tail -1)
 bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; source '$ROOT/lib/mysql.sh'; source '$ROOT/lib/redis.sh'; source '$ROOT/lib/nginx.sh'; source '$ROOT/lib/site.sh'; source '$ROOT/lib/backup.sh'
+  require_docker() { :; }
   load_env; cmd_restore '$TAR2' -y" >/dev/null 2>&1
 if diff -q "$HOME/env.copy" "$HOME/phpbox/.env" >/dev/null 2>&1; then ok "restore 后 .env 内容保真"; else bad "restore 后 .env 不一致"; fi
 if [ "$(cat "$HOME/phpbox/state/probe.txt" 2>/dev/null)" = "fidelity-probe" ]; then ok "restore 后 state 文件保真"; else bad "restore 后 state 文件缺失"; fi

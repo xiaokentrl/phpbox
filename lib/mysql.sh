@@ -1,6 +1,17 @@
 #!/bin/bash
 # shellcheck shell=bash
 
+# 清理数据目录中残留的 mysql.sock 符号链接。mysqld 运行时会在数据目录创建指向
+# /var/run/mysqld/mysqld.sock 的符号链接，容器异常停止（kill/断电/崩溃）后它不会消失；
+# mysql 官方镜像 entrypoint 启动时的 chown -R 在 overlayfs 上 chown 该符号链接会报
+# Operation not permitted，容器随即退出，配合 restart: unless-stopped 形成每分钟一轮的
+# 崩溃循环。客户端实际使用 /var/run/mysqld/mysqld.sock（镜像 /etc/my.cnf 的 [client]），
+# 删除数据目录里的这个链接无副作用
+_mysql_clean_stale_sock() {
+  local ver=$1
+  rm -f "${MYSQL_DATA_ROOT:?}/${ver}/mysql.sock"
+}
+
 _mysql_generate_compose() {
   local ver=$1
   local svc_key=$(get_service_key "mysql" "$ver")
@@ -12,8 +23,10 @@ _mysql_generate_compose() {
   local yml="$EXT_DIR/mysql-${ver}.yml"
 
   # 确保数据目录存在，并设置容器内 mysql 用户可写权限。
-  # 普通用户无权 chown，失败时借助容器内 root 兜底（Docker daemon 通常以 root 运行）
   mkdir -p "$data_dir"
+  # 先清残留 socket 再 chown：下面容器内 chown -R 的兜底路径碰它同样会报
+  # Operation not permitted，导致属主设置静默失败并留下隐患
+  _mysql_clean_stale_sock "$ver"
   if ! chown -R 999:999 "$data_dir" 2>/dev/null; then
     log "当前用户无法直接 chown 数据目录，尝试通过 Docker 容器设置属主..."
     if docker run --rm -v "$data_dir":/data alpine chown -R 999:999 /data &>/dev/null; then
@@ -30,6 +43,12 @@ services:
   $svc_key:
     image: mysql:${ver}
     container_name: $cname
+    # 容器每次启动前先清掉数据目录残留的 mysql.sock 符号链接，再进入官方 entrypoint：
+    # 异常停机残留的该链接会让 entrypoint 的 chown -R 报 Operation not permitted 而
+    # 崩溃循环（restart: unless-stopped 下每分钟重试一次）。exec 保证 docker-entrypoint.sh
+    # 仍是 PID 1，优雅停机语义不变；此覆盖同样保护 docker daemon 重启时的自动拉起路径
+    # （那时 phpbox 不在场，宿主机侧清理无从执行）
+    entrypoint: ["sh", "-c", "rm -f /var/lib/mysql/mysql.sock; exec docker-entrypoint.sh mysqld"]
     ports:
       - "\${MYSQL_${ver//./}_PORT}:3306"
     environment:
@@ -54,8 +73,12 @@ YEOF
 _mysql_ensure_running() {
   local ver=$1
   local svc_key=$(get_service_key "mysql" "$ver")
-  run_compose "mysql" "$ver" up -d "$svc_key"
   local cname=$(get_container_name "mysql" "$ver")
+  # 容器未运行时先清残留 socket 再 up；运行中则不动（up -d 幂等无操作，链接也无需处理）
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$cname"; then
+    _mysql_clean_stale_sock "$ver"
+  fi
+  run_compose "mysql" "$ver" up -d "$svc_key"
   local timeout=30
   while [ $timeout -gt 0 ]; do
     if docker exec "$cname" mysqladmin ping -h localhost &>/dev/null; then
@@ -133,7 +156,7 @@ _mysql_uninstall() {
   fi
 
   log "卸载 MySQL ${ver}"
-  run_compose "mysql" "$ver" down 2>/dev/null || true
+  stop_and_remove_container "$(get_container_name "mysql" "$ver")"
   if $purge; then
     _mysql_purge "$ver"
   else

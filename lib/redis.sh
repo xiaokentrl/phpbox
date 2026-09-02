@@ -117,7 +117,7 @@ _redis_uninstall() {
   fi
 
   log "卸载 Redis ${ver}"
-  run_compose "redis" "$ver" down 2>/dev/null || true
+  stop_and_remove_container "$(get_container_name "redis" "$ver")"
   if $purge; then
     _redis_purge "$ver"
   else

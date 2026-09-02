@@ -35,6 +35,7 @@ _phpbox_start_stopped() {
 }
 
 cmd_backup() {
+  require_docker
   local timestamp=$(date +%Y-%m-%d${BACKUP_NAME_SEPARATOR}%H-%M)
   local f="$BACKUP_DIR/backup${timestamp}.tar.gz"
   local tmpd=$(mktemp -d)
@@ -169,6 +170,9 @@ cmd_restore() {
   if [ ${#RESTORE_INVALID_PATHS[@]} -gt 0 ]; then
     error "归档包含非法路径: ${RESTORE_INVALID_PATHS[*]}"
   fi
+
+  # 路径校验先行（安全检查不依赖 daemon），通过后再要求 daemon 用于停服/恢复卷
+  require_docker
 
   log "停止 MySQL/Redis 容器以便安全恢复..."
   PHPBOX_STOPPED=()

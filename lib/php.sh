@@ -148,6 +148,8 @@ _php_install() {
     esac
   done
 
+  require_docker
+
   if [ -f "$EXT_DIR/php-${ver}.yml" ]; then
     error "PHP ${ver} 已安装，如需修改扩展请使用 'phpbox php extension add/remove'"
   fi
@@ -175,6 +177,7 @@ _php_extension_op() {
   validate_version "$ver"
   _php_validate_extensions "$ext"
 
+  # 幂等短路在前：已存在/不存在的扩展直接返回，不需要 daemon
   local current="$(_php_read_extensions "$ver")"
   local new_exts=""
   if [ "$sub" = "add" ]; then
@@ -194,6 +197,8 @@ _php_extension_op() {
   else
     error "未知扩展操作: $sub (支持 add/remove)"
   fi
+
+  require_docker
 
   _php_cleanup_images "$ver"
   rm -f "$EXT_DIR/php-${ver}.yml"
@@ -233,7 +238,7 @@ _php_uninstall() {
   fi
 
   log "卸载 PHP ${ver}"
-  run_compose "php" "$ver" down 2>/dev/null || true
+  stop_and_remove_container "$(get_container_name "php" "$ver")"
   _php_cleanup_images "$ver"
   rm -f "$EXT_DIR/php-${ver}.yml"
   rm -f "$(_php_get_extensions_file "$ver")"
