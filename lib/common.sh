@@ -69,8 +69,12 @@ load_env() {
   BACKUP_NAME_SEPARATOR="${BACKUP_NAME_SEPARATOR:--}"
   NGINX_PORT="${NGINX_PORT:-80}"
   # Nginx 镜像 tag：默认 alpine。改它即可整体换 Nginx（如 NGINX_VERSION=1.30），
-  # 站点目录与配置注入逻辑不随版本变化
+  # 站点目录与配置注入逻辑不随版本变化。
+  # tag 会被拼进目录名、yml 与 docker 命令，必须白名单校验防注入（允许 alpine/1.30/1.30-alpine）
   NGINX_VERSION="${NGINX_VERSION:-alpine}"
+  if ! [[ "$NGINX_VERSION" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+    error "无效的 NGINX_VERSION: $NGINX_VERSION（示例: alpine、1.30、1.30-alpine）"
+  fi
   CURRENT_UID="${CURRENT_UID:-$(id -u)}"
   CURRENT_GID="${CURRENT_GID:-$(id -g)}"
   MYSQL_DATA_ROOT="${MYSQL_DATA_ROOT:-$HOME/mysql-data}"

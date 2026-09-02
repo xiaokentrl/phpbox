@@ -421,3 +421,97 @@
 2026/09/02 09:43:14 [notice] 1#1: worker process 83 exited with code 0
 2026/09/02 09:43:14 [notice] 1#1: signal 29 (SIGIO) received
 2026/09/02 09:43:14 [notice] 1#1: signal 17 (SIGCHLD) received from 83
+2026/09/02 09:58:13 [notice] 739#739: signal process started
+2026/09/02 09:58:13 [notice] 1#1: signal 1 (SIGHUP) received from 739, reconfiguring
+2026/09/02 09:58:13 [notice] 1#1: reconfiguring
+2026/09/02 09:58:13 [notice] 1#1: using the "epoll" event method
+2026/09/02 09:58:13 [notice] 1#1: start worker processes
+2026/09/02 09:58:13 [notice] 1#1: start worker process 745
+2026/09/02 09:58:13 [notice] 1#1: start worker process 746
+2026/09/02 09:58:13 [notice] 1#1: start worker process 747
+2026/09/02 09:58:13 [notice] 1#1: start worker process 748
+2026/09/02 09:58:13 [notice] 1#1: start worker process 749
+2026/09/02 09:58:13 [notice] 1#1: start worker process 750
+2026/09/02 09:58:13 [notice] 1#1: start worker process 751
+2026/09/02 09:58:13 [notice] 1#1: start worker process 752
+2026/09/02 09:58:13 [notice] 1#1: start worker process 753
+2026/09/02 09:58:13 [notice] 1#1: start worker process 754
+2026/09/02 09:58:13 [notice] 1#1: start worker process 755
+2026/09/02 09:58:13 [notice] 1#1: start worker process 756
+2026/09/02 09:58:13 [notice] 1#1: start worker process 757
+2026/09/02 09:58:13 [notice] 1#1: start worker process 758
+2026/09/02 09:58:13 [notice] 1#1: start worker process 759
+2026/09/02 09:58:13 [notice] 1#1: start worker process 760
+2026/09/02 09:58:13 [notice] 196#196: gracefully shutting down
+2026/09/02 09:58:13 [notice] 198#198: gracefully shutting down
+2026/09/02 09:58:13 [notice] 207#207: gracefully shutting down
+2026/09/02 09:58:13 [notice] 199#199: gracefully shutting down
+2026/09/02 09:58:13 [notice] 200#200: gracefully shutting down
+2026/09/02 09:58:13 [notice] 200#200: exiting
+2026/09/02 09:58:13 [notice] 197#197: gracefully shutting down
+2026/09/02 09:58:13 [notice] 203#203: gracefully shutting down
+2026/09/02 09:58:13 [notice] 203#203: exiting
+2026/09/02 09:58:13 [notice] 202#202: gracefully shutting down
+2026/09/02 09:58:13 [notice] 201#201: gracefully shutting down
+2026/09/02 09:58:13 [notice] 196#196: exiting
+2026/09/02 09:58:13 [notice] 205#205: gracefully shutting down
+2026/09/02 09:58:13 [notice] 204#204: gracefully shutting down
+2026/09/02 09:58:13 [notice] 204#204: exiting
+2026/09/02 09:58:13 [notice] 198#198: exiting
+2026/09/02 09:58:13 [notice] 208#208: gracefully shutting down
+2026/09/02 09:58:13 [notice] 206#206: gracefully shutting down
+2026/09/02 09:58:13 [notice] 206#206: exiting
+2026/09/02 09:58:13 [notice] 210#210: gracefully shutting down
+2026/09/02 09:58:13 [notice] 209#209: gracefully shutting down
+2026/09/02 09:58:13 [notice] 207#207: exiting
+2026/09/02 09:58:13 [notice] 211#211: gracefully shutting down
+2026/09/02 09:58:13 [notice] 199#199: exiting
+2026/09/02 09:58:13 [notice] 200#200: exit
+2026/09/02 09:58:13 [notice] 197#197: exiting
+2026/09/02 09:58:13 [notice] 202#202: exiting
+2026/09/02 09:58:13 [notice] 203#203: exit
+2026/09/02 09:58:13 [notice] 201#201: exiting
+2026/09/02 09:58:13 [notice] 205#205: exiting
+2026/09/02 09:58:13 [notice] 196#196: exit
+2026/09/02 09:58:13 [notice] 205#205: exit
+2026/09/02 09:58:13 [notice] 204#204: exit
+2026/09/02 09:58:13 [notice] 198#198: exit
+2026/09/02 09:58:13 [notice] 208#208: exiting
+2026/09/02 09:58:13 [notice] 210#210: exiting
+2026/09/02 09:58:13 [notice] 206#206: exit
+2026/09/02 09:58:13 [notice] 210#210: exit
+2026/09/02 09:58:13 [notice] 209#209: exiting
+2026/09/02 09:58:13 [notice] 207#207: exit
+2026/09/02 09:58:13 [notice] 211#211: exiting
+2026/09/02 09:58:13 [notice] 199#199: exit
+2026/09/02 09:58:13 [notice] 211#211: exit
+2026/09/02 09:58:13 [notice] 197#197: exit
+2026/09/02 09:58:13 [notice] 202#202: exit
+2026/09/02 09:58:13 [notice] 201#201: exit
+2026/09/02 09:58:13 [notice] 208#208: exit
+2026/09/02 09:58:13 [notice] 209#209: exit
+2026/09/02 09:58:13 [notice] 1#1: signal 17 (SIGCHLD) received from 203
+2026/09/02 09:58:13 [notice] 1#1: worker process 203 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: signal 29 (SIGIO) received
+2026/09/02 09:58:13 [notice] 1#1: signal 17 (SIGCHLD) received from 208
+2026/09/02 09:58:13 [notice] 1#1: worker process 196 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 197 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 199 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 200 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 202 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 204 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 205 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 207 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 208 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 209 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 211 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: signal 29 (SIGIO) received
+2026/09/02 09:58:13 [notice] 1#1: signal 17 (SIGCHLD) received from 209
+2026/09/02 09:58:13 [notice] 1#1: signal 17 (SIGCHLD) received from 206
+2026/09/02 09:58:13 [notice] 1#1: worker process 198 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 206 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: worker process 210 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: signal 29 (SIGIO) received
+2026/09/02 09:58:13 [notice] 1#1: signal 17 (SIGCHLD) received from 201
+2026/09/02 09:58:13 [notice] 1#1: worker process 201 exited with code 0
+2026/09/02 09:58:13 [notice] 1#1: signal 29 (SIGIO) received

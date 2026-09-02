@@ -8,9 +8,23 @@ nginx_try_reload() {
   docker exec nginx nginx -s reload >/dev/null 2>&1 || true
 }
 
+# 取 Nginx 实际生效的版本 tag：优先读已安装 nginx-default.yml 里记录的镜像 tag，
+# 读不到（未安装）才回退 .env 的 NGINX_VERSION。
+# 关键场景：.env 改了 NGINX_VERSION 但尚未重装时，运行中的容器与配置仍是旧版本；
+# 若按 .env 校验会挂错目录——docker -v 遇到不存在的宿主路径还会自动建出空目录
+# （复现"nginx.conf 是个目录"的幽灵路径），并报出与真实原因无关的验证错误
+_nginx_effective_version() {
+  local yml="$EXT_DIR/nginx-default.yml" ver=""
+  if [ -f "$yml" ]; then
+    ver=$(sed -n 's/^[[:space:]]*image:[[:space:]]*nginx://p' "$yml" | head -n1)
+    ver="${ver//[[:space:]]/}"
+  fi
+  echo "${ver:-${NGINX_VERSION:-alpine}}"
+}
+
 # 用一次性容器校验 nginx 配置（sites 目录一并挂入）；输出/返回码由调用方处理
 _nginx_validate() {
-  local ver="${NGINX_VERSION:-alpine}"
+  local ver; ver=$(_nginx_effective_version)
   # 三个平级挂载，与 _nginx_generate_compose 的服务挂载一致。不能把整个版本目录
   # 挂成 /etc/nginx:ro 再嵌套挂 sites：父挂载只读时 Docker 无法 mkdirat 嵌套挂载点
   # （报 read-only file system），且 sites/ 在提取出的配置里本就不存在
