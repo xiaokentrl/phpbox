@@ -1,0 +1,33 @@
+# ── 本机环境配置 ──
+# 含 MySQL root 密码等明文密钥，绝不入仓（模板见 .env.example）
+.env
+
+# ── 运行期生成物 ──
+# 以下文件全部由 install.sh 或 phpbox 命令在首次运行时生成、或从官方镜像提取，
+# 一律不跟踪：入仓只会在每次安装 / 增删扩展 / 添加站点后产生无意义 diff。
+# 干净 clone 后执行 install.sh（或任意 phpbox 命令）即会自动重建。
+compose/docker-compose.yml
+compose/services/*.yml
+config/php/*/Dockerfile
+config/php/*/php.ini
+config/mysql/*/my.cnf
+config/nginx/*/nginx.conf
+config/nginx/*/conf.d/
+config/nginx/sites/*.conf
+state/*.env
+
+# ── 日志 ──
+logs/nginx/*.log
+logs/php/*.log
+
+# ── 备份归档：只保留目录，不保留归档内容 ──
+backups/*
+!backups/.gitkeep
+
+# ── 站点回滚 / 配置注入过程产生的临时文件 ──
+*.pbox.tmp
+
+# ── 编辑器与 IDE ──
+.idea/
+*.swp
+.DS_Store

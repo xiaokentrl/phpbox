@@ -12,6 +12,11 @@ BACKUP_DIR="$BASE_DIR/backups"
 STATE_DIR="$BASE_DIR/state"
 ENV_FILE="$BASE_DIR/.env"
 
+# 站点配置在容器内的挂载点：刻意与 Nginx 版本解耦——无论用 nginx:alpine 还是其它 tag，
+# 站点一律放 config/nginx/sites/，每个站点一个 <域名>.conf，由主配置统一 include
+SITES_MOUNT_PATH="/etc/nginx/sites"
+SITES_INCLUDE_LINE="include ${SITES_MOUNT_PATH}/*.conf;"
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 CYAN='\033[1;36m'
@@ -63,6 +68,9 @@ load_env() {
   IMAGE_TAG_SEPARATOR="${IMAGE_TAG_SEPARATOR:--}"
   BACKUP_NAME_SEPARATOR="${BACKUP_NAME_SEPARATOR:--}"
   NGINX_PORT="${NGINX_PORT:-80}"
+  # Nginx 镜像 tag：默认 alpine。改它即可整体换 Nginx（如 NGINX_VERSION=1.30），
+  # 站点目录与配置注入逻辑不随版本变化
+  NGINX_VERSION="${NGINX_VERSION:-alpine}"
   CURRENT_UID="${CURRENT_UID:-$(id -u)}"
   CURRENT_GID="${CURRENT_GID:-$(id -g)}"
   MYSQL_DATA_ROOT="${MYSQL_DATA_ROOT:-$HOME/mysql-data}"
@@ -70,12 +78,19 @@ load_env() {
   # curl/openssl/mbstring/pdo/sqlite3/xml/xmlwriter/xmlreader/simplexml/dom/fileinfo
   # 以及 sodium/pcntl/posix 等已编译进 php-fpm-alpine 镜像，无需也不能重复安装；
   # mongodb/memcached/sqlsrv/ldap 等低频扩展按需 extension add，不进默认集。
-  # apcu 钉 5.1.27：5.1.28 在 pecl 的 REST 依赖元数据缺失导致安装必败，上游修复后可改回
-  PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,apcu-5.1.27,xdebug}"
+  # apcu 暂不进默认：pecl 对其最新版（5.1.28）依赖元数据缺失、固定版本（5.1.27）查询
+  # 也失败，两条安装路径当前必败；上游恢复后用 extension add 装回并加回此列表
+  PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug}"
 
-  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS
+  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
   mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$STATE_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
+
+  # 主 compose 文件属于生成物（不入仓）：干净 clone 后首次执行任意命令时自愈生成。
+  # 它只定义共享网络，具体服务由 compose/services/*.yml 分片提供
+  if [ ! -f "$COMPOSE_FILE" ]; then
+    printf 'networks:\n  net:\n    driver: bridge\n    name: ${NETWORK_NAME:-phpboxnet}\n' > "$COMPOSE_FILE"
+  fi
 }
 
 # 版本号去掉点：8.4 → 84。服务名/容器名/镜像 tag/文件名不允许出现点，统一用无点形式
@@ -244,7 +259,7 @@ init_config_files() {
   mkdir -p "$dir"
 
   case $svc in
-    nginx) _init_nginx_config "$dir" ;;
+    nginx) _init_nginx_config "$dir" "$ver" ;;
     php)   _init_php_config "$dir" "$ver" ;;
     mysql) _init_mysql_config "$dir" "$ver" ;;
   esac
@@ -253,19 +268,51 @@ init_config_files() {
   success "$svc $ver 配置就绪"
 }
 
-# 从 nginx:alpine 镜像拷出默认配置，并把站点目录的 include 注入 http{} 段
+# 幂等地把站点目录 include 写进任意版本的 nginx.conf，保证"多站点共用一个 sites 目录"。
+# 1) 先剔除历史注入行（任意缩进、任意 sites 路径写法），否则重复 include 会让每个站点的
+#    server 块被加载两次，nginx -t 直接报 duplicate server name；
+# 2) 再把唯一权威写法插到 http{} 内：紧跟 conf.d 的 include 之后（保留镜像自带 default
+#    server 的优先语义），没有 conf.d 时退回紧跟 http{ ；
+# 3) 幂等：对同一份配置反复执行结果不变，切换/重装 Nginx 版本不会累积脏行。
+_nginx_inject_sites_include() {
+  local conf=$1
+  [ -f "$conf" ] || error "Nginx 主配置不存在: $conf"
+  local stripped="$conf.pbox.tmp"
+
+  # 清理范围限定在"路径中含 sites 目录"的 include（sites/、sites-enabled/、legacy-sites/…），
+  # 不碰 mime.types、conf.d 等无关行；历史写法若不清干净，站点 server 块会被加载两次
+  # grep 无匹配时返回 1，set -e 下必须 || true（结果为空文件也是合法的）
+  grep -vE '^[[:space:]]*include[[:space:]]+[^;]*sites[^;]*\*\.conf;[[:space:]]*$' "$conf" > "$stripped" || true
+
+  # awk 惯用法：命中锚点行后先原样打印、再追加 include，next 结束本行处理；
+  # 末尾的 "1" 是恒真条件，对其余行执行默认动作（打印）——即逐行原样输出。
+  # done 标志保证只注入一次（配置里可能出现多行 include）
+  if grep -qE '^[[:space:]]*include[[:space:]]+/etc/nginx/conf\.d/[^;]*;' "$stripped"; then
+    awk -v inc="    ${SITES_INCLUDE_LINE}" '
+      /^[[:space:]]*include[[:space:]]+\/etc\/nginx\/conf\.d\/[^;]*;/ {
+        print; if (!done) { print inc; done=1 } next
+      }
+      1
+    ' "$stripped" > "$conf"
+  else
+    awk -v inc="    ${SITES_INCLUDE_LINE}" '
+      /http[[:space:]]*{/ { print; if (!done) { print inc; done=1 } next }
+      1
+    ' "$stripped" > "$conf"
+  fi
+  rm -f "$stripped"
+
+  grep -qF "${SITES_INCLUDE_LINE}" "$conf" || error "未能向 $(basename "$conf") 注入站点目录 include"
+}
+
+# 从指定版本的 nginx 镜像拷出默认配置，并注入站点目录 include
 _init_nginx_config() {
-  local dir=$1
-  docker run --rm -v "$dir":/out nginx:alpine \
+  local dir=$1 ver=$2
+  docker run --rm -v "$dir":/out "nginx:${ver}" \
     sh -c "cp -r /etc/nginx/conf.d /out/ && cp /etc/nginx/nginx.conf /out/" || {
     rm -rf "$dir"; error "Nginx 配置提取失败"
   }
-  if [ -f "$dir/nginx.conf" ] && ! grep -q 'include /etc/nginx/sites/\*\.conf;' "$dir/nginx.conf"; then
-    # awk 惯用法：匹配到 "http {" 行时先原样打印、再追加 include 行，next 结束本行处理；
-    # 末尾的 "1" 是恒真条件，对其余行执行默认动作（打印）——即逐行原样输出
-    awk '/http[[:space:]]*{/{print; print "    include /etc/nginx/sites/*.conf;"; next}1' "$dir/nginx.conf" > "$dir/nginx.conf.tmp"
-    mv "$dir/nginx.conf.tmp" "$dir/nginx.conf"
-  fi
+  _nginx_inject_sites_include "$dir/nginx.conf"
 }
 
 # 从对应版本的 php 镜像拷出 php.ini-production 作为起点
