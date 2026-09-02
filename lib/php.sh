@@ -37,30 +37,109 @@ _php_validate_extensions() {
   done
 }
 
+# 探测构建可用的 HTTP 代理。背景：网络受限环境下 pecl.php.net 的 IPv4 被间歇性重置
+# （宿主机可能仅 IPv6 可达），而构建容器没有 IPv6 出口，也无法直达宿主 loopback 上的
+# 本地代理。关键教训：直连"单次探测通过"不代表构建期间稳定——一次构建会发起大量
+# 连接，任一被重置即失败。因此探测策略是代理优先：本地存在能通 pecl 的代理就走代理，
+# 只有探测不到代理时才直连（构建失败时由报错信息引导配置 BUILD_PROXY）。
+# 输出：代理 URL（stdout）；未探测到输出空串（走直连）
+_php_detect_build_proxy() {
+  command -v curl &>/dev/null || return 0
+  local port attempt
+  for port in 10809 7890 8118 1087 1080 8888; do
+    # -f：代理返回 4xx/5xx 也视为不可用（如仅 SOCKS 的端口对 HTTP 代理请求会报 400）；
+    # 每端口重试一次：探测连接可能与代理上残留的连接竞争而瞬断，单次失败不足以判死
+    for attempt in 1 2; do
+      if curl -4 -s -f --connect-timeout 3 --max-time 6 -x "http://127.0.0.1:$port" -o /dev/null https://pecl.php.net/channel.xml 2>/dev/null; then
+        echo "http://127.0.0.1:$port"
+        return 0
+      fi
+    done
+  done
+  return 0
+}
+
+# 渲染 Dockerfile（独立成函数便于测试断言）。heredoc 内的 $ 分工：
+#   $exts / ${exts//,/ }   生成时展开：扩展列表逗号换空格变成多个参数
+#   \$APK_MIRROR / \$http_proxy  写入字面量，真正取值发生在 docker build 时（ARG）
+#   \${UID}            写入字面量 ${UID}，同上
+_php_render_dockerfile() {
+  local ver=$1 exts=$2
+  cat <<DEOF
+FROM php:${ver}-fpm-alpine
+ARG UID=1000
+ARG GID=1000
+# APK_MIRROR：替换 Alpine 官方 CDN（国内网络对其极不稳定），如 https://mirrors.aliyun.com
+ARG APK_MIRROR=
+RUN if [ -n "\$APK_MIRROR" ]; then sed -i "s|https://dl-cdn.alpinelinux.org|\$APK_MIRROR|g; s|http://dl-cdn.alpinelinux.org|\$APK_MIRROR|g" /etc/apk/repositories; fi
+RUN apk add --no-cache shadow curl
+COPY --from=mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
+# http_proxy 是 Docker 预定义 build arg（自动注入每个 RUN 的环境）；但 PEAR 的下载器
+# 只认自己的代理配置而不读环境变量，须显式写入，否则 pecl 源码包下载仍走直连
+ARG http_proxy=
+RUN if [ -n "\$http_proxy" ]; then pear config-set http_proxy "\$http_proxy" 2>/dev/null || true; fi
+# 重试一次兜底：受限网络下连接被重置是随机的，IPE 幂等可安全重跑（已装扩展会跳过）
+RUN if [ -n "$exts" ]; then install-php-extensions ${exts//,/ } || install-php-extensions ${exts//,/ }; fi
+RUN usermod -u \${UID} www-data && groupmod -g \${GID} www-data
+DEOF
+}
+
 _php_build_image() {
   local ver=$1 exts=$2
   local img="${IMAGE_PREFIX}php${ver//./}"
   local build_dir="$CONFIG_DIR/php/$ver"
   mkdir -p "$build_dir"
+  _php_render_dockerfile "$ver" "$exts" > "$build_dir/Dockerfile"
 
-  # heredoc 内两处特殊展开：
-  #   ${exts//,/ }  生成时展开：gd,redis → "gd redis"（逗号换空格，变成多个参数）
-  #   \${UID}       写入字面量 ${UID}，真正取值发生在 docker build 时（ARG）
-  cat > "$build_dir/Dockerfile" <<DEOF
-FROM php:${ver}-fpm-alpine
-ARG UID=1000
-ARG GID=1000
-RUN apk add --no-cache shadow curl
-COPY --from=mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
-RUN if [ -n "$exts" ]; then install-php-extensions ${exts//,/ }; fi
-RUN usermod -u \${UID} www-data && groupmod -g \${GID} www-data
-DEOF
+  # BUILD_PROXY：none=禁用；auto（默认）=探测；其余按显式值（host:port 或完整 URL）
+  local proxy="${BUILD_PROXY:-auto}"
+  if [ "$proxy" = "auto" ]; then
+    proxy=$(_php_detect_build_proxy)
+  fi
+
+  local apk_mirror="${APK_MIRROR:-}"
+  local build_args=()
+  if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then
+    case "$proxy" in
+      http://*|https://*) : ;;
+      *) proxy="http://${proxy}" ;;
+    esac
+    # 构建容器无法访问宿主 loopback：代理指向本机时改写为 host.docker.internal
+    proxy="${proxy//127.0.0.1/host.docker.internal}"
+    proxy="${proxy//localhost/host.docker.internal}"
+    # 代理在途时 Alpine 官方 CDN 通常同样不通（Fastly 源经代理常被重置），
+    # 未显式配置镜像源则回退国内源（阿里源经代理实测可达）
+    if [ -z "$apk_mirror" ]; then
+      apk_mirror="https://mirrors.aliyun.com"
+    fi
+    log "检测到可用本地代理，构建流量经代理: ${proxy}"
+  fi
+
+  # 镜像源配置后做两件事：
+  # 1) --add-host 注入预解析 IP：容器内 Docker Desktop 的内嵌 DNS 对国内域名间歇性
+  #    解析失败（报 DNS: transient error），且 apk 连接挂死后无超时重试会让构建卡死；
+  #    跳过 DNS 可根治（注意 /etc/hosts 在 buildkit 中只读，必须用 --add-host 而非 RUN echo）
+  # 2) 代理路径下把镜像源域名加入 no_proxy：apk 直连国内源（大体积依赖包经代理
+  #    会慢到挂死）；仅小体积的 pecl 源码包走代理
+  local apk_mirror_host="" apk_mirror_ip=""
+  if [ -n "$apk_mirror" ]; then
+    apk_mirror_host="${apk_mirror#*://}"; apk_mirror_host="${apk_mirror_host%%/*}"
+    apk_mirror_ip=$(getent ahostsv4 "$apk_mirror_host" 2>/dev/null | awk '{print $1; exit}' || true)
+    [ -n "$apk_mirror_ip" ] && build_args+=(--add-host "${apk_mirror_host}:${apk_mirror_ip}")
+  fi
+
+  if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then
+    build_args+=(--build-arg http_proxy="$proxy" --build-arg https_proxy="$proxy" \
+                 --build-arg no_proxy="127.0.0.1,localhost${apk_mirror_host:+,$apk_mirror_host}")
+  fi
 
   log "构建 PHP ${ver} 自定义镜像（扩展: ${exts:-无}）..."
   docker build -t "$img" \
     --build-arg UID="$CURRENT_UID" \
     --build-arg GID="$CURRENT_GID" \
-    "$build_dir" || error "PHP 镜像构建失败"
+    --build-arg APK_MIRROR="$apk_mirror" \
+    "${build_args[@]}" \
+    "$build_dir" || error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
 
   echo "$img"
 }

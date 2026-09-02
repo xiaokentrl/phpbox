@@ -85,8 +85,13 @@ load_env() {
   # apcu 暂不进默认：pecl 对其最新版（5.1.28）依赖元数据缺失、固定版本（5.1.27）查询
   # 也失败，两条安装路径当前必败；上游恢复后用 extension add 装回并加回此列表
   PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug}"
+  # PHP 镜像构建的网络适配：
+  #   APK_MIRROR  替换 Alpine 官方软件源（如 https://mirrors.aliyun.com），空=用官方源
+  #   BUILD_PROXY 构建代理：auto（默认，pecl 直连不通时自动探测本地代理）/ none / host:port
+  APK_MIRROR="${APK_MIRROR:-}"
+  BUILD_PROXY="${BUILD_PROXY:-auto}"
 
-  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS
+  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR BUILD_PROXY
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
   mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$STATE_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
 
