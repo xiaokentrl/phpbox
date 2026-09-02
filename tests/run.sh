@@ -128,9 +128,29 @@ assert_not_contains "nginx: 清理历史 sites 注入行" "$OLD_TXT" "legacy-sit
 if [ "$(grep -c 'sites/\*\.conf;' "$OLD")" -eq 1 ]; then ok "nginx: 清理后仅保留一条 sites include"; else bad "nginx: 清理后仍有多条 sites include"; fi
 rm -f "$INJ" "$OLD"
 
-# 恢复默认版本，避免影响后续用例
-NGINX_VERSION=alpine
+# 版本漂移：.env 改了 NGINX_VERSION 但 yml 未重建时，校验必须以 yml 里实际 tag 为准
+NGINX_VERSION=1.30
 _nginx_generate_compose
+NGINX_VERSION=alpine
+if [ "$(_nginx_effective_version)" = "1.30" ]; then
+  ok "nginx: 已安装实例的版本优先于 .env（防漂移）"
+else
+  bad "nginx: 版本漂移校验失败（effective=$(_nginx_effective_version)，期望 1.30）"
+fi
+rm -f "$HOME/phpbox/compose/services/nginx-default.yml"
+if [ "$(_nginx_effective_version)" = "alpine" ]; then
+  ok "nginx: 未安装时回退 NGINX_VERSION"
+else
+  bad "nginx: 未安装时回退失败（effective=$(_nginx_effective_version)）"
+fi
+# 恢复默认版本，避免影响后续用例
+_nginx_generate_compose
+
+# NGINX_VERSION 会被拼进目录/yml/docker 命令，注入字符必须在 load_env 即被拒绝
+assert_cmd_error "nginx: 含分号的 NGINX_VERSION 被拒" "无效的 NGINX_VERSION" \
+  env NGINX_VERSION='1.30; rm -rf /' bash -c "source '$ROOT/lib/common.sh'; load_env"
+assert_cmd_error "nginx: 含路径穿越的 NGINX_VERSION 被拒" "无效的 NGINX_VERSION" \
+  env NGINX_VERSION='../etc' bash -c "source '$ROOT/lib/common.sh'; load_env"
 
 echo "== 2. 站点模板求值 + switch/list 解析 =="
 T=$(mktemp -d)
