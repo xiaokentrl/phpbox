@@ -1,9 +1,10 @@
-#phpbox仅用于本地开发环境,一切以本地开发为主
+#phpbox仅用于本地开发环境,一切以本地开发为主,力求代码简单明了，力求新手一看就能看懂代码，力求适合人类阅读习惯，力求最佳实践。
 #!/bin/bash
 set -euo pipefail
 
 echo ">>> 创建目录结构..."
-mkdir -p ~/phpbox/{bin,lib,compose/services,config/{php,mysql,nginx/{sites,conf.d}},logs/{nginx,php},backups,state,data}
+# sites 是唯一的站点目录（每个站点一个 <域名>.conf），不随 Nginx 版本变化，故不建 conf.d
+mkdir -p ~/phpbox/{bin,lib,compose/services,config/{php,mysql,nginx/sites},logs/{nginx,php},backups,state,data}
 
 echo ">>> 复制 CLI 源码..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -85,6 +85,53 @@ assert_contains "nginx: nginx.conf 挂载到 phpbox 内" "$NGINX_CONF" "source: 
 assert_contains "nginx: sites 目录挂载到 phpbox 内" "$NGINX_CONF" "source: $HOME/phpbox/config/nginx/sites"
 assert_contains "nginx: 日志目录挂载到 phpbox 内" "$NGINX_CONF" "source: $HOME/phpbox/logs/nginx"
 
+# 站点目录必须与 Nginx 版本解耦：换 tag 只换主配置目录，sites 挂载点一字不变
+NGINX_VERSION=1.30
+_nginx_generate_compose
+NGINX_YML_130=$(cat "$HOME/phpbox/compose/services/nginx-default.yml")
+assert_contains "nginx: 换版本后主配置目录随版本" "$NGINX_YML_130" "./config/nginx/1.30/nginx.conf"
+assert_contains "nginx: 换版本后镜像 tag 随版本" "$NGINX_YML_130" "image: nginx:1.30"
+assert_contains "nginx: 换版本后 sites 挂载不变" "$NGINX_YML_130" "./config/nginx/sites:/etc/nginx/sites:ro"
+assert_not_contains "nginx: 版本目录下不出现 sites" "$NGINX_YML_130" "./config/nginx/1.30/sites"
+
+# 主配置注入 sites include：位置在 conf.d 之后、且重复执行不累积
+INJ=$(mktemp)
+cat > "$INJ" <<'EOF'
+user  nginx;
+http {
+    include       /etc/nginx/mime.types;
+    include       /etc/nginx/conf.d/*.conf;
+}
+EOF
+_nginx_inject_sites_include "$INJ"
+INJ_TXT=$(cat "$INJ")
+assert_contains "nginx: 注入站点 include" "$INJ_TXT" "include /etc/nginx/sites/*.conf;"
+INJ_CONFD_LINE=$(grep -n 'conf\.d/\*\.conf;' "$INJ" | head -1 | cut -d: -f1)
+INJ_SITES_LINE=$(grep -n 'sites/\*\.conf;' "$INJ" | head -1 | cut -d: -f1)
+if [ -n "$INJ_CONFD_LINE" ] && [ -n "$INJ_SITES_LINE" ] && [ "$INJ_SITES_LINE" -gt "$INJ_CONFD_LINE" ]; then
+  ok "nginx: sites include 位于 conf.d 之后"
+else
+  bad "nginx: sites include 位置错误（conf.d=$INJ_CONFD_LINE sites=$INJ_SITES_LINE）"
+fi
+
+_nginx_inject_sites_include "$INJ"
+_nginx_inject_sites_include "$INJ"
+INJ_CNT=$(grep -c 'sites/\*\.conf;' "$INJ")
+if [ "$INJ_CNT" -eq 1 ]; then ok "nginx: 重复注入不产生重复 include"; else bad "nginx: 注入不幂等（出现 $INJ_CNT 条）"; fi
+
+# 旧写法/不同缩进的历史注入行应被清理，只保留权威写法
+OLD=$(mktemp)
+printf 'http {\n\tinclude /etc/nginx/sites/*.conf;\n    include  /etc/nginx/legacy-sites/*.conf;\n}\n' > "$OLD"
+_nginx_inject_sites_include "$OLD"
+OLD_TXT=$(cat "$OLD")
+assert_not_contains "nginx: 清理历史 sites 注入行" "$OLD_TXT" "legacy-sites"
+if [ "$(grep -c 'sites/\*\.conf;' "$OLD")" -eq 1 ]; then ok "nginx: 清理后仅保留一条 sites include"; else bad "nginx: 清理后仍有多条 sites include"; fi
+rm -f "$INJ" "$OLD"
+
+# 恢复默认版本，避免影响后续用例
+NGINX_VERSION=alpine
+_nginx_generate_compose
+
 echo "== 2. 站点模板求值 + switch/list 解析 =="
 T=$(mktemp -d)
 site=demo.test

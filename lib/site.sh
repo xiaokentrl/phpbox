@@ -1,7 +1,10 @@
 #!/bin/bash
 # shellcheck shell=bash
 
+# 站点目录：与 Nginx 版本解耦（不落在 config/nginx/<版本>/ 下），所有版本共用同一份站点。
+# 一个站点一个 <域名>.conf，由主配置里的 include 统一加载
 SITES_DIR="$CONFIG_DIR/nginx/sites"
+mkdir -p "$SITES_DIR"
 
 # 域名校验：支持多级域名（如 demo.test、a.b.example.com），每段以字母数字开头结尾
 _valid_domain() {

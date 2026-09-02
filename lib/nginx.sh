@@ -10,23 +10,33 @@ nginx_try_reload() {
 
 # 用一次性容器校验 nginx 配置（sites 目录一并挂入）；输出/返回码由调用方处理
 _nginx_validate() {
-  # 三个平级挂载，与 _nginx_generate_compose 的服务挂载一致。不能把整个 alpine 目录
+  local ver="${NGINX_VERSION:-alpine}"
+  # 三个平级挂载，与 _nginx_generate_compose 的服务挂载一致。不能把整个版本目录
   # 挂成 /etc/nginx:ro 再嵌套挂 sites：父挂载只读时 Docker 无法 mkdirat 嵌套挂载点
   # （报 read-only file system），且 sites/ 在提取出的配置里本就不存在
   # 不加 --user：与 compose 里的真实服务一致以 root 运行。nginx -t 会尝试打开
   # pid 文件（/run/nginx.pid）验证可写，非 root 在该路径必因权限失败导致误报
   docker run --rm \
-    -v "$CONFIG_DIR/nginx/alpine/nginx.conf":/etc/nginx/nginx.conf:ro \
-    -v "$CONFIG_DIR/nginx/alpine/conf.d":/etc/nginx/conf.d:ro \
-    -v "$CONFIG_DIR/nginx/sites":/etc/nginx/sites:ro \
-    nginx:alpine nginx -t
+    -v "$CONFIG_DIR/nginx/${ver}/nginx.conf":/etc/nginx/nginx.conf:ro \
+    -v "$CONFIG_DIR/nginx/${ver}/conf.d":/etc/nginx/conf.d:ro \
+    -v "$CONFIG_DIR/nginx/sites":${SITES_MOUNT_PATH}:ro \
+    "nginx:${ver}" nginx -t
 }
 
 _nginx_generate_compose() {
-  local ver="alpine"
+  # 版本由 .env 的 NGINX_VERSION 决定（默认 alpine）；版本只影响主配置与 conf.d 的目录，
+  # 站点目录恒为 config/nginx/sites，切换版本不会动到任何站点
+  local ver="${NGINX_VERSION:-alpine}"
   local yml="$EXT_DIR/nginx-default.yml"
 
   init_config_files "nginx" "$ver"
+
+  # 配置已存在时 init_config_files 会跳过重建，这里再跑一次幂等注入：
+  # 旧版把 sites include 插在 http{ 首行（mime.types 之前），此处统一规范化到 conf.d 之后
+  local conf="$CONFIG_DIR/nginx/${ver}/nginx.conf"
+  if [ -f "$conf" ]; then
+    _nginx_inject_sites_include "$conf"
+  fi
 
   cat > "$yml" <<YEOF
 services:
@@ -39,7 +49,7 @@ services:
       - \${WWW_ROOT}:/var/www:ro
       - ./config/nginx/${ver}/conf.d:/etc/nginx/conf.d:ro
       - ./config/nginx/${ver}/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./config/nginx/sites:/etc/nginx/sites:ro
+      - ./config/nginx/sites:${SITES_MOUNT_PATH}:ro
       - ./logs/nginx:/var/log/nginx:rw
     networks:
       - net
@@ -92,7 +102,7 @@ _nginx_install() {
   done
 
   if [ -f "$EXT_DIR/nginx-default.yml" ]; then
-    echo -e "${YELLOW}Nginx 已安装 (使用 nginx:alpine)${NC}"
+    echo -e "${YELLOW}Nginx 已安装 (使用 nginx:${NGINX_VERSION:-alpine})${NC}"
     if ! confirm_yes "是否安全重装（保留配置和站点）？"; then
       [[ -t 0 ]] && { log "取消重装"; return; }   # 终端里答 n → 取消；脚本环境 → 报错
       error "非交互模式，取消重装"
