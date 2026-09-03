@@ -30,4 +30,5 @@ backups/*
 # ── 编辑器与 IDE ──
 .idea/
 *.swp
+*.log
 .DS_Store
