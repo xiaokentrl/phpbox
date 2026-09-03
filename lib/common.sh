@@ -258,6 +258,59 @@ env_set() {
   fi
 }
 
+# 从 .env 删除键（半安装回滚用）；键不存在时静默。键名仅含字母数字下划线，可安全拼进 sed
+env_unset() {
+  sed_i "/^${1}=/d" "$ENV_FILE" 2>/dev/null || true
+}
+
+# ---- 半安装回滚 ----
+# 安装类命令：_install_rollback_begin → 写配置/起容器 → 成功 _install_rollback_commit。
+# 中途任何一步 error() 退出都会触发 EXIT trap，由 _install_rollback_run 清掉"本次新增"的
+# yml/配置目录/数据目录/state 文件与 .env 键——只清理本次新增的（先快照存在性），不碰历史残留
+_ROLLBACK_PENDING=false
+_ROLLBACK_SVC="" ; _ROLLBACK_VER=""
+_ROLLBACK_CONFIG_EXISTED=false ; _ROLLBACK_DATA_EXISTED=false ; _ROLLBACK_STATE_EXISTED=false
+_ROLLBACK_PORT_EXISTED=false ; _ROLLBACK_PASS_EXISTED=false
+
+_install_rollback_begin() {
+  local svc=$1 ver=$2 key
+  _ROLLBACK_PENDING=true ; _ROLLBACK_SVC=$svc ; _ROLLBACK_VER=$ver
+  if [ -d "$CONFIG_DIR/$svc/$ver" ]; then _ROLLBACK_CONFIG_EXISTED=true; fi
+  if [ -d "$MYSQL_DATA_ROOT/$ver" ]; then _ROLLBACK_DATA_EXISTED=true; fi
+  if [ -f "$STATE_DIR/php-${ver//./}-extensions.env" ]; then _ROLLBACK_STATE_EXISTED=true; fi
+  key=$(port_key "$svc" "$ver")
+  if [ -n "$(read_env_value "$key" "")" ]; then _ROLLBACK_PORT_EXISTED=true; fi
+  key="${svc^^}_${ver//./}_ROOT_PASSWORD"
+  if [ -n "$(read_env_value "$key" "")" ]; then _ROLLBACK_PASS_EXISTED=true; fi
+}
+
+_install_rollback_commit() { _ROLLBACK_PENDING=false; }
+
+_install_rollback_run() {
+  $_ROLLBACK_PENDING || return 0
+  local svc=$_ROLLBACK_SVC ver=$_ROLLBACK_VER key
+  log "安装失败，自动清理 ${svc} ${ver} 的半安装状态..."
+  rm -f "$EXT_DIR/${svc}-${ver}.yml"
+  if ! $_ROLLBACK_CONFIG_EXISTED; then rm -rf "$CONFIG_DIR/$svc/$ver"; fi
+  case "$svc" in
+    mysql)
+      if ! $_ROLLBACK_DATA_EXISTED; then rm -rf "$MYSQL_DATA_ROOT/$ver"; fi ;;
+    redis)
+      docker volume rm -f "$(get_volume_name redis "$ver")" &>/dev/null || true ;;
+    php)
+      if ! $_ROLLBACK_STATE_EXISTED; then rm -f "$STATE_DIR/php-${ver//./}-extensions.env"; fi
+      _php_cleanup_images "$ver" ;;
+  esac
+  if ! $_ROLLBACK_PORT_EXISTED; then
+    key=$(port_key "$svc" "$ver"); env_unset "$key"
+  fi
+  if ! $_ROLLBACK_PASS_EXISTED; then
+    env_unset "${svc^^}_${ver//./}_ROOT_PASSWORD"
+  fi
+  _ROLLBACK_PENDING=false
+}
+trap '_install_rollback_run' EXIT
+
 run_compose() {
   local svc=$1 ver=$2; shift 2
   local service_file="$EXT_DIR/${svc}-${ver}.yml"
@@ -385,9 +438,16 @@ _generic_service_install() {
   local svc=$1 ver=$2 default_port=$3
   shift 3
   validate_version "$ver"
+  # 版本线守门：官方镜像没有的大版本直接拒绝（MySQL 5.7 之后没有 6.x/7.x）。
+  # 不拦的话要走到拉取阶段才报一句 "denied"，前面的配置/属主设置全白做
+  case "$svc" in
+    mysql) [[ "$ver" == 5.* || "$ver" == 8.* || "$ver" == 9.* ]] || error "MySQL 不存在 ${ver%%.*}.x 版本（5.7 之后直接是 8.0），可用版本线: 5.7 / 8.0 / 8.4 / 9.x" ;;
+    redis) [[ "$ver" == [4-9].* ]] || error "Redis 可用版本线: 4.x / 5.x / 6.x / 7.x / 8.x" ;;
+  esac
   if [ -f "$EXT_DIR/${svc}-${ver}.yml" ]; then
     error "${svc} ${ver} 已安装"
   fi
+  _install_rollback_begin "$svc" "$ver"
 
   local port=""
   while [[ $# -gt 0 ]]; do
@@ -420,6 +480,7 @@ _generic_service_install() {
   # up 之后端口已定（用户指定或自动挑选时均已写入 .env），只读不再复查：
   # 此时宿主机端口已被刚启动的容器自己监听，复查会被误判为"被占"而改写 .env、报错端口
   local final_port; final_port=$(read_env_value "$(port_key "$svc" "$ver")" "$default_port")
+  _install_rollback_commit
   success "${svc} ${ver} 安装完成，端口 ${final_port}"
 }
 
