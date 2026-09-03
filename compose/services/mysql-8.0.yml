@@ -2,7 +2,11 @@ services:
   mysql80:
     image: mysql:8.0
     container_name: mysql80
-    # 启动前清理数据目录残留的 mysql.sock 符号链接，防止 entrypoint chown 崩溃循环（见 lib/mysql.sh）
+    # 容器每次启动前先清掉数据目录残留的 mysql.sock 符号链接，再进入官方 entrypoint：
+    # 异常停机残留的该链接会让 entrypoint 的 chown -R 报 Operation not permitted 而
+    # 崩溃循环（restart: unless-stopped 下每分钟重试一次）。exec 保证 docker-entrypoint.sh
+    # 仍是 PID 1，优雅停机语义不变；此覆盖同样保护 docker daemon 重启时的自动拉起路径
+    # （那时 phpbox 不在场，宿主机侧清理无从执行）
     entrypoint: ["sh", "-c", "rm -f /var/lib/mysql/mysql.sock; exec docker-entrypoint.sh mysqld"]
     ports:
       - "${MYSQL_80_PORT}:3306"

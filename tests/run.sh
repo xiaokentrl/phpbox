@@ -58,6 +58,8 @@ source "$ROOT/lib/site.sh"
 source "$ROOT/lib/backup.sh"
 _php_build_image() { echo "stub-image"; }
 init_config_files() { :; }
+# 本套件不依赖 daemon（compose config 是纯客户端渲染），桩掉 daemon 预检以维持该契约
+require_docker() { :; }
 load_env
 
 echo "== 1. 生成服务 yml 并渲染（路径解析/环境变量/卷名）=="
@@ -258,6 +260,21 @@ OUT=$(bash -c "
   _mysql_ensure_running() { :; }   # 桩：禁止测试触碰真实 daemon（会重建生产容器）
   require_docker() { :; }; load_env; cmd_mysql install 8.0.35" 2>&1) || true
 if echo "$OUT" | grep -q "无效版本号"; then bad "三段版本 8.0.35 不应被拒"; else ok "三段版本 8.0.35 放行"; fi
+assert_cmd_error "mysql 7.4（不存在的版本线）被拒" "不存在" bash -c "
+  set -euo pipefail; export HOME=$HOME; cd '$ROOT'
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; load_env; cmd_mysql install 7.4"
+
+echo "== 7. 安装失败自动回滚半安装状态 =="
+OUT=$(bash -c "
+  set -euo pipefail; export HOME=$HOME; cd '$ROOT'
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'
+  _mysql_ensure_running() { error '模拟启动失败'; }
+  load_env; cmd_mysql install 8.4 --port 3384" 2>&1) || true
+if [ -f "$HOME/phpbox/compose/services/mysql-8.4.yml" ]; then bad "失败后 yml 未回滚"; else ok "失败后 yml 已回滚"; fi
+if grep -q '^MYSQL_84_PORT=' "$HOME/phpbox/.env" 2>/dev/null; then bad ".env 端口键未回滚"; else ok ".env 端口键已回滚"; fi
+if grep -q '^MYSQL_84_ROOT_PASSWORD=' "$HOME/phpbox/.env" 2>/dev/null; then bad ".env 密码键未回滚"; else ok ".env 密码键已回滚"; fi
+if [ -d "$HOME/phpbox/config/mysql/8.4" ]; then bad "配置目录未回滚"; else ok "配置目录已回滚"; fi
+if [ -d "$HOME/mysql-custom/8.4" ]; then bad "数据目录未回滚"; else ok "数据目录已回滚"; fi
 
 OUT=$(bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'

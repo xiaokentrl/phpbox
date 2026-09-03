@@ -129,8 +129,8 @@ _php_build_image() {
   fi
 
   if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then
-    build_args+=(--build-arg http_proxy="$proxy" --build-arg https_proxy="$proxy" \
-                 --build-arg no_proxy="127.0.0.1,localhost${apk_mirror_host:+,$apk_mirror_host}")
+    build_args+=(--build-arg http_proxy="$proxy" --build-arg https_proxy="$proxy")
+    build_args+=(--build-arg no_proxy="127.0.0.1,localhost${apk_mirror_host:+,$apk_mirror_host}")
   fi
 
   log "构建 PHP ${ver} 自定义镜像（扩展: ${exts:-无}）..."
@@ -215,6 +215,8 @@ _php_install() {
   local ver="${1:-}"
   [ -z "$ver" ] && error "用法: phpbox php install <版本> [--extensions 扩展列表]"
   validate_version "$ver"
+  # 版本线守门：php:X-fpm-alpine 官方镜像只发布过 5.x / 7.x / 8.x
+  [[ "$ver" == 5.* || "$ver" == 7.* || "$ver" == 8.* ]] || error "PHP 不存在 ${ver%%.*}.x 版本，可用版本线: 5.6 / 7.x / 8.x"
   shift
 
   local exts=""
@@ -232,6 +234,7 @@ _php_install() {
   if [ -f "$EXT_DIR/php-${ver}.yml" ]; then
     error "PHP ${ver} 已安装，如需修改扩展请使用 'phpbox php extension add/remove'"
   fi
+  _install_rollback_begin "php" "$ver"
   # 未指定 --extensions 时采用默认扩展集（.env 的 PHP_DEFAULT_EXTENSIONS 可覆盖）
   if [ -z "$exts" ]; then
     exts="$PHP_DEFAULT_EXTENSIONS"
@@ -243,6 +246,7 @@ _php_install() {
   init_config_files "php" "$ver"
   _php_generate_compose "$ver"
   _php_ensure_running "$ver"
+  _install_rollback_commit
   success "PHP ${ver} 安装完成"
 }
 
@@ -254,6 +258,7 @@ _php_extension_op() {
   [ -z "$ver" ] && error "请指定 PHP 版本"
   [ -z "$ext" ] && error "请指定扩展名"
   validate_version "$ver"
+  [[ "$ver" == 5.* || "$ver" == 7.* || "$ver" == 8.* ]] || error "PHP 不存在 ${ver%%.*}.x 版本，可用版本线: 5.6 / 7.x / 8.x"
   _php_validate_extensions "$ext"
 
   # 幂等短路在前：已存在/不存在的扩展直接返回，不需要 daemon
