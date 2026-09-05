@@ -132,7 +132,7 @@ _mysql_purge() {
   local ver=$1
   local data_dir="${MYSQL_DATA_ROOT}/${ver}"
   if confirm_yes "确认删除数据目录 ${data_dir} 吗？不可恢复！"; then
-    rm -rf "$data_dir"
+    _rm_rf_with_docker_fallback "$data_dir"
   elif ! [[ -t 0 ]]; then
     log "非交互模式，保留数据目录"
   fi

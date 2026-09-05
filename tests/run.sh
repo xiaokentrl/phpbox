@@ -43,6 +43,8 @@ networks:
 EOF
 cat > "$HOME/phpbox/.env" <<EOF
 PROJECT_NAME=phpbox
+WWW_ROOT=$HOME/www
+NGINX_PORT=80
 MYSQL_DATA_ROOT=$HOME/mysql-custom
 EOF
 mkdir -p "$HOME/phpbox/state" "$HOME/phpbox/config" "$HOME/www" "$HOME/mysql-custom"
@@ -89,12 +91,14 @@ assert_contains "nginx: nginx.conf 挂载到 phpbox 内" "$NGINX_CONF" "source: 
 assert_contains "nginx: sites 目录挂载到 phpbox 内" "$NGINX_CONF" "source: $HOME/phpbox/config/nginx/sites"
 assert_contains "nginx: 日志目录挂载到 phpbox 内" "$NGINX_CONF" "source: $HOME/phpbox/logs/nginx"
 
-# PHP Dockerfile 渲染：镜像源/代理支持须落在生成物上
-DOCKERFILE_TXT=$(_php_render_dockerfile 8.4 "gd,redis")
-assert_contains "php: Dockerfile 支持 APK_MIRROR 换源" "$DOCKERFILE_TXT" 'sed -i "s|https://dl-cdn.alpinelinux.org|$APK_MIRROR|g'
-assert_contains "php: Dockerfile 给 PEAR 写入代理配置" "$DOCKERFILE_TXT" 'pear config-set http_proxy'
+# PHP Dockerfile 渲染：镜像源/依赖顺序须落在生成物上。
+# 注意：PEAR 代理配置已由 IPE 自管（手写 config-set 会因 scheme 解析损坏代理），
+# 此处反向断言其不存在，防止回归
+DOCKERFILE_TXT=$(_php_render_dockerfile 8.4 "gd,redis" "" 0)
+assert_contains "php: Dockerfile 多镜像源 repositories" "$DOCKERFILE_TXT" 'for m in $APK_MIRRORS'
+assert_not_contains "php: Dockerfile 不应手写 PEAR 代理配置（IPE 自管）" "$DOCKERFILE_TXT" 'pear config-set http_proxy'
 assert_contains "php: 扩展列表展开为多参数" "$DOCKERFILE_TXT" "install-php-extensions gd redis"
-assert_contains "php: UID/GID 保持构建时取值" "$DOCKERFILE_TXT" 'usermod -u ${UID}'
+assert_contains "php: UID/GID 保持构建时取值" "$DOCKERFILE_TXT" "usermod -u \${UID}"
 
 # 站点目录必须与 Nginx 版本解耦：换 tag 只换主配置目录，sites 挂载点一字不变
 NGINX_VERSION=1.30
@@ -265,16 +269,17 @@ assert_cmd_error "mysql 7.4（不存在的版本线）被拒" "不存在" bash -
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'; load_env; cmd_mysql install 7.4"
 
 echo "== 7. 安装失败自动回滚半安装状态 =="
+# 用第 1 节未生成过的 7.4：若用 8.4 会撞上"已安装"守卫，回滚逻辑根本不会被触发
 OUT=$(bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/mysql.sh'
   _mysql_ensure_running() { error '模拟启动失败'; }
-  load_env; cmd_mysql install 8.4 --port 3384" 2>&1) || true
-if [ -f "$HOME/phpbox/compose/services/mysql-8.4.yml" ]; then bad "失败后 yml 未回滚"; else ok "失败后 yml 已回滚"; fi
-if grep -q '^MYSQL_84_PORT=' "$HOME/phpbox/.env" 2>/dev/null; then bad ".env 端口键未回滚"; else ok ".env 端口键已回滚"; fi
-if grep -q '^MYSQL_84_ROOT_PASSWORD=' "$HOME/phpbox/.env" 2>/dev/null; then bad ".env 密码键未回滚"; else ok ".env 密码键已回滚"; fi
-if [ -d "$HOME/phpbox/config/mysql/8.4" ]; then bad "配置目录未回滚"; else ok "配置目录已回滚"; fi
-if [ -d "$HOME/mysql-custom/8.4" ]; then bad "数据目录未回滚"; else ok "数据目录已回滚"; fi
+  load_env; cmd_mysql install 7.4 --port 3374" 2>&1) || true
+if [ -f "$HOME/phpbox/compose/services/mysql-7.4.yml" ]; then bad "失败后 yml 未回滚"; else ok "失败后 yml 已回滚"; fi
+if grep -q '^MYSQL_74_PORT=' "$HOME/phpbox/.env" 2>/dev/null; then bad ".env 端口键未回滚"; else ok ".env 端口键已回滚"; fi
+if grep -q '^MYSQL_74_ROOT_PASSWORD=' "$HOME/phpbox/.env" 2>/dev/null; then bad ".env 密码键未回滚"; else ok ".env 密码键已回滚"; fi
+if [ -d "$HOME/phpbox/config/mysql/7.4" ]; then bad "配置目录未回滚"; else ok "配置目录已回滚"; fi
+if [ -d "$HOME/mysql-custom/7.4" ]; then bad "数据目录未回滚"; else ok "数据目录已回滚"; fi
 
 OUT=$(bash -c "
   set -euo pipefail; export HOME=$HOME; cd '$ROOT'
@@ -325,6 +330,37 @@ bash -c "
   load_env; cmd_restore '$TAR2' -y" >/dev/null 2>&1
 if diff -q "$HOME/env.copy" "$HOME/phpbox/.env" >/dev/null 2>&1; then ok "restore 后 .env 内容保真"; else bad "restore 后 .env 不一致"; fi
 if [ "$(cat "$HOME/phpbox/state/probe.txt" 2>/dev/null)" = "fidelity-probe" ]; then ok "restore 后 state 文件保真"; else bad "restore 后 state 文件缺失"; fi
+
+echo "== 8. 离线 Dockerfile：依赖层必须先于一切编译 =="
+# 回归背景：离线渲染曾把 apk add --no-network 排在 pecl 循环之后，
+# phpize 因找不到 autoconf 失败（Cannot find autoconf）
+OFFLINE_DF=$(bash -c "
+  set -uo pipefail; export HOME=$HOME; cd '$ROOT'
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
+  _php_render_dockerfile 8.0 'bcmath,gd' 'imagick.tgz redis.tgz' 1")
+DEPS_N=$(echo "$OFFLINE_DF" | grep -n "apk add --no-network /tmp/apk" | cut -d: -f1)
+PECL_N=$(echo "$OFFLINE_DF" | grep -n "pecl install" | cut -d: -f1)
+INST_N=$(echo "$OFFLINE_DF" | grep -n "docker-php-ext-install" | cut -d: -f1)
+COPY_N=$(echo "$OFFLINE_DF" | grep -c "COPY pecl")
+if [ -n "$DEPS_N" ] && [ -n "$PECL_N" ] && [ -n "$INST_N" ] && [ "$DEPS_N" -lt "$PECL_N" ] && [ "$DEPS_N" -lt "$INST_N" ]; then
+  ok "离线：依赖安装层先于 pecl 与内置编译"
+else
+  bad "离线：依赖安装层顺序错误（deps=$DEPS_N pecl=$PECL_N inst=$INST_N）"
+fi
+if [ "$COPY_N" -eq 1 ]; then ok "离线：COPY pecl 恰好出现一次"; else bad "离线：COPY pecl 出现 $COPY_N 次（应为 1）"; fi
+ONLINE_DF=$(bash -c "
+  set -uo pipefail; export HOME=$HOME; cd '$ROOT'
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
+  _php_render_dockerfile 8.0 'bcmath,gd' 'imagick.tgz redis.tgz' 0")
+DEPS_N=$(echo "$ONLINE_DF" | grep -n 'PHPIZE_DEPS' | head -1 | cut -d: -f1)
+PECL_N=$(echo "$ONLINE_DF" | grep -n "pecl install" | cut -d: -f1)
+COPY_N=$(echo "$ONLINE_DF" | grep -c "COPY pecl")
+if [ -n "$DEPS_N" ] && [ -n "$PECL_N" ] && [ "$DEPS_N" -lt "$PECL_N" ]; then
+  ok "在线：依赖安装层先于 pecl 编译"
+else
+  bad "在线：依赖安装层顺序错误（deps=$DEPS_N pecl=$PECL_N）"
+fi
+if [ "$COPY_N" -eq 1 ]; then ok "在线：COPY pecl 恰好出现一次"; else bad "在线：COPY pecl 出现 $COPY_N 次（应为 1）"; fi
 
 echo
 echo "结果: $PASS 通过, $FAIL 失败"

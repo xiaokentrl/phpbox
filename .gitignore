@@ -10,8 +10,8 @@ compose/docker-compose.yml
 compose/services/*.yml
 config/php/*/Dockerfile
 config/php/*/php.ini
-config/php/*/php-exts/
-config/php/*/php-pkgs/
+config/php/*/pecl/
+config/php/*/apk/
 config/mysql/*/my.cnf
 config/nginx/*/nginx.conf
 config/nginx/*/conf.d/
