@@ -59,12 +59,110 @@ _php_detect_build_proxy() {
   return 0
 }
 
-# 渲染 Dockerfile（独立成函数便于测试断言）。heredoc 内的 $ 分工：
-#   $exts / ${exts//,/ }   生成时展开：扩展列表逗号换空格变成多个参数
-#   \$APK_MIRROR / \$http_proxy  写入字面量，真正取值发生在 docker build 时（ARG）
-#   \${UID}            写入字面量 ${UID}，同上
+# pecl 远端模块清单：这些扩展的源码包不在 php 源码树里，需从 pecl.php.net 下载。
+# 其余扩展（gd/zip/pgsql 等）是"内置模块"，IPE 用镜像内 PHP 源码离线编译，不依赖网络
+_PHP_PECL_REMOTE_EXTS="imagick xdebug redis"
+_PECL_STAGED=""   # 本次构建暂存（尚未验证）的 pecl 包名，构建成功后才晋升进备份库
+
+# pecl 源码包下载地址。新版扩展会放弃旧 PHP（imagick 3.8 起要求 PHP ≥ 8.0、
+# xdebug 最新版要求 PHP ≥ 8.0——7.4 上报 "requires PHP (version >= 8.0.0)"），
+# 对不兼容的组合钉住仍支持的旧版本，避免 pecl 拉到最新版后在依赖检查上直接失败
+_php_pecl_tarball_url() {
+  local ext=$1 ver=$2
+  case "$ext" in
+    imagick) case "$ver" in 7.*) echo "https://pecl.php.net/get/imagick-3.7.0.tgz"; return ;; esac ;;
+    xdebug)  case "$ver" in 7.*) echo "https://pecl.php.net/get/xdebug-3.1.6.tgz"; return ;; esac ;;
+  esac
+  echo "https://pecl.php.net/get/$ext"
+}
+
+# 宿主机侧暂存 pecl 源码包到构建上下文：优先命中按 PHP 版本隔离的备份库
+# （config/php/pecl-cache/<版本>/，目录即归属，人工整理不会混放版本），未命中才经
+# 宿主代理下载并暂存。暂存 ≠ 入库：包是否可用要等构建验证（见 _php_promote_pecl_tarballs），
+# 备份库里因此只会有验证成功的包。手动放入官网 tgz（按"扩展-版本.tgz"命名到对应版本目录）
+# 视为用户自证可用，直接命中
+_php_stage_pecl_tarballs() {
+  local ver=$1 remote_list=$2 dest=$3
+  local backup_dir="$CONFIG_DIR/php/pecl-cache/$ver"
+  mkdir -p "$backup_dir" "$dest"
+  local proxy="${BUILD_PROXY:-auto}"
+  if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
+  local curl_args=()
+  if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then curl_args+=(-x "$proxy"); fi
+
+  _PECL_STAGED=""
+  local ext url fname tmp
+  for ext in $remote_list; do
+    url=$(_php_pecl_tarball_url "$ext" "$ver")
+    tmp=$(mktemp)
+    # -L 跟随 /get/<ext> 的版本跳转，url_effective 即最终带版本号的 URL，取其文件名做备份键
+    if ! curl -fsSL -S --retry 2 --connect-timeout 8 -o "$tmp" -w '%{url_effective}' \
+      "${curl_args[@]}" "$url" > "$tmp.url"; then
+      rm -f "$tmp" "$tmp.url"
+      _php_discard_staged_tarballs "$dest"
+      error "pecl 包 $ext 预下载失败（检查网络或 .env 的 BUILD_PROXY）"
+    fi
+    fname=$(basename "$(cat "$tmp.url")")
+    rm -f "$tmp.url"
+    [[ "$fname" == *.tgz ]] || fname="$ext.tgz"   # 无跳转时拿不到版本号，退回旧命名
+    if [ -f "$backup_dir/$fname" ]; then
+      log "pecl 备份命中: $fname"
+      rm -f "$tmp"
+      cp "$backup_dir/$fname" "$dest/$fname"
+    else
+      mv "$tmp" "$dest/$fname"
+      log "pecl 包已暂存（构建成功后入备份库）: $fname"
+      _PECL_STAGED="$_PECL_STAGED $fname"
+    fi
+  done
+  _PECL_STAGED="${_PECL_STAGED# }"
+}
+
+# 构建成功 = 暂存包在本 PHP 版本上编译与启用全部通过：晋升进备份库供以后直接复用。
+# 构建失败的路径不会走到这里，暂存包随构建目录清理而消失——备份库永远不收验证失败的包
+_php_promote_pecl_tarballs() {
+  local ver=$1 dest=$2
+  [ -n "$_PECL_STAGED" ] || return 0
+  local backup_dir="$CONFIG_DIR/php/pecl-cache/$ver"
+  mkdir -p "$backup_dir"
+  local fname
+  for fname in $_PECL_STAGED; do
+    cp "$dest/$fname" "$backup_dir/$fname"
+    log "已验证入备份库: pecl-cache/$ver/$fname"
+  done
+  _PECL_STAGED=""
+}
+
+# 渲染 Dockerfile（独立成函数便于测试断言）。参数分工：
+#   bundled  内置模块名列表（逗号分隔，IPE 离线编译）
+#   remote   预下载的本地 tarball 文件名列表（空格分隔，可能为空）
+# heredoc 内的 $ 分工：
+#   $bundled / ${bundled//,/ }  生成时展开：逗号换空格变成多个参数
+#   \$APK_MIRROR / \${UID}      写入字面量，真正取值发生在 docker build 时（ARG）
+# 各扩展的 apk 编译期依赖映射（"扩展:包,包"，空格分隔多个映射；包名跨 alpine 版本稳定）。
+# 全部扩展的依赖一次性装进独立 RUN 层并缓存：失败重试/重建不再重复下载数百 MiB；
+# 映射未覆盖的依赖由 IPE 按名自行安装（网络路径照旧），此处缺失只会变慢不会失败
+_PHP_BUILD_BASE_APK_DEPS="musl-dev linux-headers pkgconf re2c"
+_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
+
+_php_ext_apk_deps() {
+  local names=${1//,/ } ext pair out="$_PHP_BUILD_BASE_APK_DEPS"
+  for ext in $names; do
+    for pair in $_PHP_EXT_APK_DEPS; do
+      case "$pair" in "$ext:"*) out="$out ${pair#*:}" ;; esac
+    done
+  done
+  echo "$out" | tr ',' ' ' | tr -s ' '
+}
+
 _php_render_dockerfile() {
-  local ver=$1 exts=$2
+  local ver=$1 bundled=$2 remote=$3
+  local remote_block=""
+  if [ -n "$remote" ]; then
+    remote_block="COPY php-exts/ /tmp/php-exts/
+RUN for t in /tmp/php-exts/*.tgz; do pecl install \"\$t\" && docker-php-ext-enable \"\$(basename \"\$t\" .tgz | sed 's/-[0-9][0-9.]*\$//')\" || exit 1; done"
+  fi
+  local apk_deps; apk_deps=$(_php_ext_apk_deps "$bundled,${remote//.tgz/}")
   cat <<DEOF
 FROM php:${ver}-fpm-alpine
 ARG UID=1000
@@ -73,15 +171,107 @@ ARG GID=1000
 ARG APK_MIRROR=
 RUN if [ -n "\$APK_MIRROR" ]; then sed -i "s|https://dl-cdn.alpinelinux.org|\$APK_MIRROR|g; s|http://dl-cdn.alpinelinux.org|\$APK_MIRROR|g" /etc/apk/repositories; fi
 RUN apk add --no-cache shadow curl
+# 工具链与全部扩展的系统依赖一次性装齐并独立成层：该层成功后即被构建缓存，
+# 失败重试/重建/换扩展列表都不会再重复拉取；IPE 内部的按模块装卸发现已装即跳过
+RUN apk add --no-cache \$PHPIZE_DEPS $apk_deps
 COPY --from=mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
-# http_proxy 是 Docker 预定义 build arg（自动注入每个 RUN 的环境）；但 PEAR 的下载器
-# 只认自己的代理配置而不读环境变量，须显式写入，否则 pecl 源码包下载仍走直连
-ARG http_proxy=
-RUN if [ -n "\$http_proxy" ]; then pear config-set http_proxy "\$http_proxy" 2>/dev/null || true; fi
+# pecl 远端模块的源码包已在宿主机侧预下载并 COPY 进来，本地安装不依赖容器内网络
+# （pecl.php.net 的 DNS/REST 在受限网络不可达，且老镜像捆绑的 PEAR 有代理解析 bug）
+${remote_block}
 # 重试一次兜底：受限网络下连接被重置是随机的，IPE 幂等可安全重跑（已装扩展会跳过）
-RUN if [ -n "$exts" ]; then install-php-extensions ${exts//,/ } || install-php-extensions ${exts//,/ }; fi
+RUN if [ -n "$bundled" ]; then install-php-extensions ${bundled//,/ } || install-php-extensions ${bundled//,/ }; fi
 RUN usermod -u \${UID} www-data && groupmod -g \${GID} www-data
 DEOF
+}
+
+# 归一化代理地址并改写为构建容器可达的宿主地址，stdout 输出最终值。
+# 原生 docker 的构建容器里 host.docker.internal 默认不解析（Desktop VM 才内置该域名），
+# 换引擎后 pecl 全部死于 DNS；直接改用 docker0 网关 IP（容器内零 DNS 可达），
+# 取不到再退回域名并由 build_args 的 --add-host host-gateway 兜底
+_php_resolve_build_proxy() {
+  local proxy=$1
+  case "$proxy" in
+    http://*|https://*) : ;;
+    *) proxy="http://${proxy}" ;;
+  esac
+  local proxy_gw=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+  if [ -n "$proxy_gw" ]; then
+    proxy="${proxy//127.0.0.1/$proxy_gw}"
+    proxy="${proxy//localhost/$proxy_gw}"
+  else
+    proxy="${proxy//127.0.0.1/host.docker.internal}"
+    proxy="${proxy//localhost/host.docker.internal}"
+  fi
+  echo "$proxy"
+}
+
+# 解析 BUILD_PROXY 为容器可达的最终代理地址，stdout 输出（none 或 http://URL）。
+# none=禁用；auto（默认）=探测本地常见代理端口；其余按显式值（host:port 或完整 URL）。
+# 原生 docker 的构建容器里 host.docker.internal 默认不解析（Desktop VM 才内置该域名），
+# 换引擎后 pecl 全部死于 DNS：代理指向本机时改写为 docker0 网关 IP（容器内零 DNS 可达），
+# 取不到再退回域名，并由调用方的 --add-host host-gateway 兜底
+_php_resolve_build_proxy() {
+  local proxy="${BUILD_PROXY:-auto}"
+  if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
+  if [ -z "$proxy" ] || [ "$proxy" = "none" ]; then echo "none"; return 0; fi
+  case "$proxy" in
+    http://*|https://*) : ;;
+    *) proxy="http://${proxy}" ;;
+  esac
+  local proxy_gw=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+  if [ -n "$proxy_gw" ]; then
+    proxy="${proxy//127.0.0.1/$proxy_gw}"
+    proxy="${proxy//localhost/$proxy_gw}"
+  else
+    proxy="${proxy//127.0.0.1/host.docker.internal}"
+    proxy="${proxy//localhost/host.docker.internal}"
+  fi
+  echo "$proxy"
+}
+
+# 把逗号分隔的扩展列表拆成 内置/远端 两组（写入全局 _SPLIT_BUNDLED/_SPLIT_REMOTE 供调用方读取）
+_php_split_ext_list() {
+  local exts=$1 ext
+  _SPLIT_BUNDLED="" ; _SPLIT_REMOTE=""
+  local IFS=,
+  for ext in $exts; do
+    case " $_PHP_PECL_REMOTE_EXTS " in
+      *" $ext "*) _SPLIT_REMOTE="$_SPLIT_REMOTE $ext" ;;
+      *) _SPLIT_BUNDLED="${_SPLIT_BUNDLED:+$_SPLIT_BUNDLED,}$ext" ;;
+    esac
+  done
+  _SPLIT_REMOTE="${_SPLIT_REMOTE# }"
+}
+
+# 把镜像源域名按预解析 IP 输出为 --add-host 参数（两行：标志与值；无镜像源或解析失败输出空）。
+# 容器内 DNS 对国内域名间歇性失败（DNS: transient error）且 apk 连接挂死无重试，跳过 DNS 可根治；
+# /etc/hosts 在 buildkit 中只读，必须用 --add-host 而非 RUN echo
+_php_mirror_host_args() {
+  local apk_mirror=$1
+  local host="${apk_mirror#*://}"; host="${host%%/*}"
+  local ip=$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}' || true)
+  if [ -n "$ip" ]; then echo "--add-host"; echo "$host:$ip"; fi
+}
+
+# 构建失败时彻底删除暂存目录：未验证的包没有备份库正本、命中副本的母本在备份库不受影响，
+# 留在磁盘上只是垃圾。暂存标记同步清空，防止后续误晋升
+_php_discard_staged_tarballs() {
+  rm -rf "$1"
+  _PECL_STAGED=""
+}
+
+# 执行镜像构建并收尾：成功→暂存包验证晋升入备份库；失败→彻底删除暂存目录后报错退出。
+# 二选一是刻意的：失败路径绝不晋升，保证备份库里只有对本 PHP 版本验证可用的包
+_php_docker_build_verified() {
+  local img=$1 build_dir=$2 ver=$3
+  shift 3
+  local build_rc=0
+  docker build -t "$img" "$@" "$build_dir" || build_rc=$?
+  if [ $build_rc -ne 0 ]; then
+    _php_discard_staged_tarballs "$build_dir/php-exts"
+    error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
+  fi
+  _php_promote_pecl_tarballs "$ver" "$build_dir/php-exts"
 }
 
 _php_build_image() {
@@ -89,57 +279,53 @@ _php_build_image() {
   local img="${IMAGE_PREFIX}php${ver//./}"
   local build_dir="$CONFIG_DIR/php/$ver"
   mkdir -p "$build_dir"
-  _php_render_dockerfile "$ver" "$exts" > "$build_dir/Dockerfile"
 
-  # BUILD_PROXY：none=禁用；auto（默认）=探测；其余按显式值（host:port 或完整 URL）
-  local proxy="${BUILD_PROXY:-auto}"
-  if [ "$proxy" = "auto" ]; then
-    proxy=$(_php_detect_build_proxy)
+  _php_split_ext_list "$exts"
+  local bundled=$_SPLIT_BUNDLED remote=$_SPLIT_REMOTE
+
+  local remote_files=""
+  if [ -n "$remote" ]; then
+    rm -rf "$build_dir/php-exts"
+    mkdir -p "$build_dir/php-exts"
+    _php_stage_pecl_tarballs "$ver" "$remote" "$build_dir/php-exts"
+    local tgz
+    for tgz in "$build_dir"/php-exts/*.tgz; do
+      remote_files="$remote_files $(basename "$tgz")"
+    done
+    remote_files="${remote_files# }"
   fi
+  _php_render_dockerfile "$ver" "$bundled" "$remote_files" > "$build_dir/Dockerfile"
 
+  local proxy; proxy=$(_php_resolve_build_proxy)
   local apk_mirror="${APK_MIRROR:-}"
   local build_args=()
-  if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then
-    case "$proxy" in
-      http://*|https://*) : ;;
-      *) proxy="http://${proxy}" ;;
-    esac
-    # 构建容器无法访问宿主 loopback：代理指向本机时改写为 host.docker.internal
-    proxy="${proxy//127.0.0.1/host.docker.internal}"
-    proxy="${proxy//localhost/host.docker.internal}"
+  if [ "$proxy" != "none" ]; then
     # 代理在途时 Alpine 官方 CDN 通常同样不通（Fastly 源经代理常被重置），
     # 未显式配置镜像源则回退国内源（阿里源经代理实测可达）
-    if [ -z "$apk_mirror" ]; then
-      apk_mirror="https://mirrors.aliyun.com"
-    fi
-    log "检测到可用本地代理，构建流量经代理: ${proxy}"
+    if [ -z "$apk_mirror" ]; then apk_mirror="https://mirrors.aliyun.com"; fi
+    log "构建流量经代理: ${proxy}"
   fi
 
-  # 镜像源配置后做两件事：
-  # 1) --add-host 注入预解析 IP：容器内 Docker Desktop 的内嵌 DNS 对国内域名间歇性
-  #    解析失败（报 DNS: transient error），且 apk 连接挂死后无超时重试会让构建卡死；
-  #    跳过 DNS 可根治（注意 /etc/hosts 在 buildkit 中只读，必须用 --add-host 而非 RUN echo）
-  # 2) 代理路径下把镜像源域名加入 no_proxy：apk 直连国内源（大体积依赖包经代理
-  #    会慢到挂死）；仅小体积的 pecl 源码包走代理
-  local apk_mirror_host="" apk_mirror_ip=""
-  if [ -n "$apk_mirror" ]; then
-    apk_mirror_host="${apk_mirror#*://}"; apk_mirror_host="${apk_mirror_host%%/*}"
-    apk_mirror_ip=$(getent ahostsv4 "$apk_mirror_host" 2>/dev/null | awk '{print $1; exit}' || true)
-    [ -n "$apk_mirror_ip" ] && build_args+=(--add-host "${apk_mirror_host}:${apk_mirror_ip}")
-  fi
+  # 镜像源域名用预解析 IP 注入；代理在途时把镜像源域名加入 no_proxy：apk 直连国内源
+  # （大体积依赖包经代理会慢到挂死），仅小体积的 pecl 源码包走代理
+  local apk_mirror_host=""
+  if [ -n "$apk_mirror" ]; then apk_mirror_host="${apk_mirror#*://}"; apk_mirror_host="${apk_mirror_host%%/*}"; fi
+  mapfile -t mirror_args < <(_php_mirror_host_args "$apk_mirror")
+  if [ ${#mirror_args[@]} -gt 0 ]; then build_args+=("${mirror_args[@]}"); fi
 
-  if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then
+  if [ "$proxy" != "none" ]; then
     build_args+=(--build-arg http_proxy="$proxy" --build-arg https_proxy="$proxy")
     build_args+=(--build-arg no_proxy="127.0.0.1,localhost${apk_mirror_host:+,$apk_mirror_host}")
+    # 网关 IP 取不到时的兜底：让 host.docker.internal 在构建容器内解析到宿主
+    build_args+=(--add-host "host.docker.internal:host-gateway")
   fi
 
   log "构建 PHP ${ver} 自定义镜像（扩展: ${exts:-无}）..."
-  docker build -t "$img" \
+  _php_docker_build_verified "$img" "$build_dir" "$ver" \
     --build-arg UID="$CURRENT_UID" \
     --build-arg GID="$CURRENT_GID" \
     --build-arg APK_MIRROR="$apk_mirror" \
-    "${build_args[@]}" \
-    "$build_dir" || error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
+    "${build_args[@]}"
 
   echo "$img"
 }
