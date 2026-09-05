@@ -10,11 +10,16 @@ compose/docker-compose.yml
 compose/services/*.yml
 config/php/*/Dockerfile
 config/php/*/php.ini
+config/php/*/php-exts/
+config/php/*/php-pkgs/
 config/mysql/*/my.cnf
 config/nginx/*/nginx.conf
 config/nginx/*/conf.d/
 config/nginx/sites/*.conf
 state/*.env
+
+# ── 离线备份库：二进制体积大且由构建自动沉淀，迁移走 phpbox backup ──
+offline/
 
 # ── 日志 ──
 logs/nginx/*.log
