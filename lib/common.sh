@@ -48,6 +48,22 @@ confirm_yes() {
   [[ "$ans" == "y" || "$ans" == "Y" ]]
 }
 
+# 解析并归一化 Alpine 镜像源列表（结果写入全局 APK_MIRRORS，空格分隔）。
+# APK_MIRRORS 已配置 → 每个源补全 /alpine 后缀（ICM 镜像的路径前缀不同）；
+# 未配置 → 默认 阿里云主源 + 官方 CDN 兜底；兼容旧变量 APK_MIRROR（作为首源并入）
+_load_apk_mirrors() {
+  local m normalized=""
+  APK_MIRRORS="${APK_MIRRORS:-}"
+  if [ -z "$APK_MIRRORS" ]; then
+    APK_MIRRORS="https://mirrors.aliyun.com/alpine https://dl-cdn.alpinelinux.org/alpine"
+    [ -n "${APK_MIRROR:-}" ] && APK_MIRRORS="$APK_MIRROR $APK_MIRRORS"
+  fi
+  for m in $APK_MIRRORS; do
+    case "$m" in */alpine) normalized="$normalized $m" ;; *) normalized="$normalized $m/alpine" ;; esac
+  done
+  APK_MIRRORS=${normalized# }
+}
+
 load_env() {
   if [ -f "$ENV_FILE" ]; then
     # IFS='=' 使 read 按等号拆分：key 取第一段，剩余全部并入 value（密码含 = 也不会截断）
@@ -88,13 +104,11 @@ load_env() {
   # apcu 暂不进默认：pecl 对其最新版（5.1.28）依赖元数据缺失、固定版本（5.1.27）查询
   # 也失败，两条安装路径当前必败；上游恢复后用 extension add 装回并加回此列表
   PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug}"
-  # PHP 镜像构建的网络适配：
-  #   APK_MIRROR  替换 Alpine 官方软件源（如 https://mirrors.aliyun.com），空=用官方源
-  #   BUILD_PROXY 构建代理：auto（默认，pecl 直连不通时自动探测本地代理）/ none / host:port
-  APK_MIRROR="${APK_MIRROR:-}"
+  # PHP 镜像构建的网络适配（镜像源列表解析见 _load_apk_mirrors）：
   BUILD_PROXY="${BUILD_PROXY:-auto}"
+  _load_apk_mirrors
 
-  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR BUILD_PROXY OFFLINE_DIR
+  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR APK_MIRRORS BUILD_PROXY OFFLINE_DIR
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
   mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$STATE_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
 
@@ -267,6 +281,15 @@ env_unset() {
 }
 
 # ---- 半安装回滚 ----
+# 删除可能已被容器内用户（如 mysql 的 999）接管的目录：宿主 rm 会因权限失败，
+# 借容器内 root 兜底（与属主 chown 兜底同一思路）。回滚/卸载清理专用，失败不抛出
+_rm_rf_with_docker_fallback() {
+  local dir=$1
+  rm -rf "$dir" 2>/dev/null && return 0
+  [ -d "$dir" ] || return 0   # rm 虽报错但目标已不存在，视为成功
+  docker run --rm -v "${dir%/*}":/parent alpine rm -rf "/parent/${dir##*/}" >/dev/null 2>&1 || true
+}
+
 # 安装类命令：_install_rollback_begin → 写配置/起容器 → 成功 _install_rollback_commit。
 # 中途任何一步 error() 退出都会触发 EXIT trap，由 _install_rollback_run 清掉"本次新增"的
 # yml/配置目录/数据目录/state 文件与 .env 键——只清理本次新增的（先快照存在性），不碰历史残留
@@ -297,7 +320,7 @@ _install_rollback_run() {
   if ! $_ROLLBACK_CONFIG_EXISTED; then rm -rf "$CONFIG_DIR/$svc/$ver"; fi
   case "$svc" in
     mysql)
-      if ! $_ROLLBACK_DATA_EXISTED; then rm -rf "$MYSQL_DATA_ROOT/$ver"; fi ;;
+      if ! $_ROLLBACK_DATA_EXISTED; then _rm_rf_with_docker_fallback "$MYSQL_DATA_ROOT/$ver"; fi ;;
     redis)
       docker volume rm -f "$(get_volume_name redis "$ver")" &>/dev/null || true ;;
     php)

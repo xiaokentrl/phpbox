@@ -63,8 +63,6 @@ _php_detect_build_proxy() {
 # 其余扩展（gd/zip/pgsql 等）是"内置模块"，IPE 用镜像内 PHP 源码离线编译，不依赖网络
 _PHP_PECL_REMOTE_EXTS="imagick xdebug redis"
 _PECL_STAGED=""   # 本次构建暂存（尚未验证）的 pecl 包名，构建成功后才晋升进备份库
-_APK_STAGED=""    # 本次构建暂存（尚未验证）的 apk 闭包包名列表，同上
-
 # pecl 源码包下载地址。新版扩展会放弃旧 PHP（imagick 3.8 起要求 PHP ≥ 8.0、
 # xdebug 最新版要求 PHP ≥ 8.0——7.4 上报 "requires PHP (version >= 8.0.0)"），
 # 对不兼容的组合钉住仍支持的旧版本，避免 pecl 拉到最新版后在依赖检查上直接失败
@@ -84,9 +82,10 @@ _php_pecl_tarball_url() {
 # 视为用户自证可用，直接命中
 _php_stage_pecl_tarballs() {
   local ver=$1 remote_list=$2 build_dir=$3
-  local dest="$build_dir/php-exts"
+  local dest="$build_dir/pecl"
   local backup_dir="$OFFLINE_DIR/php/$ver/pecl"
   mkdir -p "$backup_dir" "$dest"
+  log "pecl 备份库: $backup_dir → 构建目录: $dest"
   local proxy="${BUILD_PROXY:-auto}"
   if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
   local curl_args=()
@@ -108,12 +107,12 @@ _php_stage_pecl_tarballs() {
     rm -f "$tmp.url"
     [[ "$fname" == *.tgz ]] || fname="$ext.tgz"   # 无跳转时拿不到版本号，退回旧命名
     if [ -f "$backup_dir/$fname" ]; then
-      log "pecl 备份命中: $fname"
+      log "pecl 备份命中: $backup_dir/$fname → $dest/"
       rm -f "$tmp"
       cp "$backup_dir/$fname" "$dest/$fname"
     else
       mv "$tmp" "$dest/$fname"
-      log "pecl 包已暂存（构建成功后入备份库）: $fname"
+      log "pecl 已下载暂存: $dest/$fname（源: $url，构建成功后晋升备份库）"
       _PECL_STAGED="$_PECL_STAGED $fname"
     fi
   done
@@ -136,50 +135,65 @@ _php_promote_pecl_tarballs() {
 }
 
 # 宿主机侧暂存 apk 依赖闭包到构建上下文：优先命中按版本隔离的备份库
-# （offline/php/<版本>/apk/，整批对应一个 PHP 版本，构建成功后才入库），未命中时
-# 借助与目标镜像同源的辅助容器 apk fetch --recursive 预取（与构建走同一镜像源和 DNS 注入）。
-# 预取失败仅返回 1 由调用方降级为在线安装路径，不会中断安装
+# （offline/php/<版本>/apk/，整批对应一个 PHP 版本，预取并试装成功后立即入库），未命中时
+# 借助与目标镜像同源的辅助容器，向一个空 root 做一次"全新安装"——apk 只下载缺失的包，
+# 直接 fetch 会跳过容器里已装的基础包导致闭包不完整；--initdb 的空 root 视为全未安装，
+# 拉下的 .apk 集合因此必然完整，且"能装完"本身就是对闭包的验证。预取失败仅返回 1 由
+# 调用方降级为在线安装路径，不会中断安装
 _php_stage_apk_closure() {
   local ver=$1 deps=$2 dest=$3
   local backup_dir="$OFFLINE_DIR/php/$ver/apk"
-  _APK_STAGED=""
+  # 暂存目录可能残留 chown 修复之前由容器写入的 root 属主文件，宿主用户删不动，走容器兜底清空
+  _rm_rf_with_docker_fallback "$dest"
   mkdir -p "$dest"
-  if [ -n "$(ls -A "$backup_dir" 2>/dev/null)" ]; then
-    log "apk 离线闭包命中（$(ls "$backup_dir" | wc -l) 个包）"
-    cp "$backup_dir"/*.apk "$dest/"
-    return 0
-  fi
-  local mirror="${APK_MIRROR:-https://mirrors.aliyun.com}"
+  local mirror="${APK_MIRRORS%% *}"   # 主源（首个）：用于 DNS 预解析
   local addhost=()
   mapfile -t addhost < <(_php_mirror_host_args "$mirror")
-  log "预取 apk 离线闭包（$ver，$(wc -w <<<"$deps") 个包）..."
-  if ! docker run --rm "${addhost[@]}" -e APK_MIRROR="$mirror" -v "$dest":/pkgs \
+  log "apk 闭包备份库: $backup_dir → 构建目录: $dest"
+  log "apk 镜像源（按序故障转移）: $APK_MIRRORS"
+  if [ -n "$(ls -A "$backup_dir" 2>/dev/null)" ]; then
+    log "apk 闭包命中: $backup_dir → $dest/（$(ls "$backup_dir" | wc -l) 个包）"
+    cp "$backup_dir"/*.apk "$dest/"
+  else
+    log "apk 闭包预取: 宿主容器内 apk fetch --recursive → $dest/（$ver，$(wc -w <<<"$deps") 个包）"
+  if ! docker run --rm "${addhost[@]}" -e APK_MIRRORS="$APK_MIRRORS" -e HOST_UID="$CURRENT_UID" -v "$dest":/pkgs \
       "php:${ver}-fpm-alpine" sh -c '
-        sed -i "s|https://dl-cdn.alpinelinux.org|$APK_MIRROR|g; s|http://dl-cdn.alpinelinux.org|$APK_MIRROR|g" /etc/apk/repositories
+        # 多镜像源 repositories：apk 原生按序尝试，单源失败自动切下一个
+        cp /etc/apk/repositories /tmp/repos.orig
+        : > /etc/apk/repositories
+        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
+        # 必须先 apk update：新容器没有缓存的索引，fetch 会就地报 unable to select
+        apk update >/dev/null
         apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS '"$deps"' >/dev/null
+        chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
       '; then
-    log "警告：apk 离线闭包预取失败，本次构建降级为在线安装"
+    log "警告：apk 闭包预取失败，本次构建降级为在线安装（备份库保持为空，下次构建自动重试）"
     rm -rf "$dest"
     return 1
   fi
-  _APK_STAGED=$(ls "$dest")
-  if [ -z "$_APK_STAGED" ]; then
-    log "警告：apk 离线闭包预取结果为空，本次构建降级为在线安装"
-    rm -rf "$dest"
-    return 1
-  fi
-  return 0
-}
-
-# 构建成功 = 闭包在本 PHP 版本上安装/编译全部通过：整批晋升进备份库，下次构建离线可用
-_php_promote_apk_closure() {
-  local ver=$1 dest=$2
-  [ -n "$_APK_STAGED" ] || return 0
-  local backup_dir="$OFFLINE_DIR/php/$ver/apk"
   mkdir -p "$backup_dir"
-  cp "$dest"/*.apk "$backup_dir/"
-  log "apk 离线闭包已验证入备份库: offline/php/$ver/apk/（$(ls "$backup_dir" | wc -l) 个包）"
-  _APK_STAGED=""
+  cp "$dest"/*.apk "$backup_dir/" 2>/dev/null || true
+  log "apk 闭包已入备份库: offline/php/$ver/apk/（$(ls "$backup_dir" | wc -l) 个包）"
+  fi
+  # 基础包同步（重要）：基础镜像"钉死库版本"的包（openssl 等不在依赖闭包里），
+  # 镜像源前进后其精确 pin 会与闭包里的新库 breaks——把基础镜像的全量包
+  # 按当前镜像源版本补进暂存，离线安装时整个基础系统一起升级，版本重新对齐。
+  # 离线场景此步会失败：容忍（未漂移时旧闭包仍可用；已漂移则需联网重试一次）
+  if ! docker run --rm "${addhost[@]}" -e APK_MIRRORS="$APK_MIRRORS" -v "$dest":/pkgs \
+      "php:${ver}-fpm-alpine" sh -c '
+        cp /etc/apk/repositories /tmp/repos.orig
+        : > /etc/apk/repositories
+        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
+        apk update >/dev/null
+        apk fetch -o /pkgs $(apk info -q) 2>/dev/null
+      ' >/dev/null 2>&1; then
+    log "警告：基础包同步失败（离线场景可忽略）；若构建报 breaks 版本冲突，请联网重试一次"
+  fi
+  # 暂存集 = 依赖闭包 + 基础镜像全量包（当前镜像源版本）= 可离线安装的一致状态。晋升备份库
+  mkdir -p "$backup_dir"
+  cp "$dest"/*.apk "$backup_dir/" 2>/dev/null || true
+  log "apk 闭包已入备份库: offline/php/$ver/apk/（$(ls "$backup_dir" | wc -l) 个包）"
+  return 0
 }
 
 # 渲染 Dockerfile（独立成函数便于测试断言）。参数分工：
@@ -187,12 +201,12 @@ _php_promote_apk_closure() {
 #   remote   预下载的本地 tarball 文件名列表（空格分隔，可能为空）
 # heredoc 内的 $ 分工：
 #   $bundled / ${bundled//,/ }  生成时展开：逗号换空格变成多个参数
-#   \$APK_MIRROR / \${UID}      写入字面量，真正取值发生在 docker build 时（ARG）
+#   \$APK_MIRRORS / \${UID}     写入字面量，真正取值发生在 docker build 时（ARG）
 # 各扩展的 apk 编译期依赖映射（"扩展:包,包"，空格分隔多个映射；包名跨 alpine 版本稳定）。
 # 全部扩展的依赖一次性装进独立 RUN 层并缓存：失败重试/重建不再重复下载数百 MiB；
 # 映射未覆盖的依赖由 IPE 按名自行安装（网络路径照旧），此处缺失只会变慢不会失败
 _PHP_BUILD_BASE_APK_DEPS="musl-dev linux-headers pkgconf re2c"
-_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
+_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev,libwebp-dev,zlib-dev,libxpm-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
 
 _php_ext_apk_deps() {
   local names=${1//,/ } ext pair out="$_PHP_BUILD_BASE_APK_DEPS"
@@ -206,32 +220,35 @@ _php_ext_apk_deps() {
 
 _php_render_dockerfile() {
   local ver=$1 bundled=$2 remote_files=$3 offline=$4
-  # pecl 本地安装块：COPY 与安装循环必须成对出现——两条渲染路径（在线/离线）都要带上
-  local pecl_block=""
+  # COPY pecl 与 pecl 循环拆开维护：COPY 必须在依赖安装层之前，循环必须在之后
+  local copy_exts="" pecl_loop=""
   if [ -n "$remote_files" ]; then
-    pecl_block="COPY php-exts/ /tmp/php-exts/
-RUN for t in /tmp/php-exts/*.tgz; do [ -e \"\$t\" ] || { echo \"ERROR: /tmp/php-exts/ 下没有 .tgz 包\"; exit 1; }; pecl install \"\$t\" && docker-php-ext-enable \"\$(basename \"\$t\" .tgz | sed 's/-[0-9][0-9.]*\$//')\" || exit 1; done"
+    copy_exts="COPY pecl/ /tmp/pecl/"
+    pecl_loop="RUN for t in /tmp/pecl/*.tgz; do [ -e \"\$t\" ] || { echo \"ERROR: /tmp/pecl/ 下没有 .tgz 包\"; exit 1; }; pecl install \"\$t\" && docker-php-ext-enable \"\$(basename \"\$t\" .tgz | sed 's/-[0-9][0-9.]*\$//')\" || exit 1; done"
   fi
   local apk_deps; apk_deps=$(_php_ext_apk_deps "$bundled,${remote_files//.tgz/}")
   local body=""
   if [ "$offline" = "1" ]; then
     # 离线：apk 依赖闭包 + 官方 docker-php-ext-install，全程零网络（连 IPE 二进制都不拉取）。
+    # 顺序即正确性：工具链与系统依赖（apk add --no-network）先于一切编译。
     # gd 需要 freetype/jpeg/webp 支持时官方默认配置不带，显式传参补齐
     local configure_gd=""
-    case ",$bundled," in *,gd,*) configure_gd="docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp && " ;; esac
+    case ",$bundled," in *,gd,*) configure_gd="docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp --with-xpm && " ;; esac
     local bundled_install=""
     if [ -n "$bundled" ]; then
       bundled_install="RUN $configure_gd docker-php-ext-install -j\"\$(nproc)\" ${bundled//,/ }"
     fi
-    body="COPY php-pkgs/ /tmp/php-pkgs/
-$pecl_block
-RUN apk add --no-network /tmp/php-pkgs/*.apk
+    body="COPY apk/ /tmp/apk/
+$copy_exts
+RUN apk add --no-network /tmp/apk/*.apk
+$pecl_loop
 $bundled_install"
   else
     body="RUN apk add --no-cache shadow curl
 COPY --from=mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
 RUN apk add --no-cache \$PHPIZE_DEPS $apk_deps
-$pecl_block
+$copy_exts
+$pecl_loop
 # 重试一次兜底：受限网络下连接被重置是随机的，IPE 幂等可安全重跑（已装扩展会跳过）
 RUN if [ -n \"$bundled\" ]; then install-php-extensions ${bundled//,/ } || install-php-extensions ${bundled//,/ }; fi"
   fi
@@ -239,10 +256,11 @@ RUN if [ -n \"$bundled\" ]; then install-php-extensions ${bundled//,/ } || insta
 FROM php:${ver}-fpm-alpine
 ARG UID=1000
 ARG GID=1000
-# APK_MIRROR：替换 Alpine 官方 CDN（国内网络对其极不稳定），如 https://mirrors.aliyun.com
-ARG APK_MIRROR=
-RUN if [ -n "\$APK_MIRROR" ]; then sed -i "s|https://dl-cdn.alpinelinux.org|\$APK_MIRROR|g; s|http://dl-cdn.alpinelinux.org|\$APK_MIRROR|g" /etc/apk/repositories; fi
-# 依赖与源码包全部来自宿主机侧本地备份（offline/apk、offline/pecl），构建不依赖容器内网络
+# APK_MIRRORS：Alpine 镜像源列表（空格分隔，按序故障转移），值截取到 /alpine 含
+ARG APK_MIRRORS="https://mirrors.aliyun.com/alpine https://dl-cdn.alpinelinux.org/alpine"
+RUN cp /etc/apk/repositories /tmp/repos.orig && : > /etc/apk/repositories && \
+  for m in \$APK_MIRRORS; do case "\$m" in */alpine) : ;; *) m="\$m/alpine" ;; esac; sed "s|https://dl-cdn.alpinelinux.org/alpine|\$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
+# 依赖与源码包全部来自宿主机侧本地备份（apk-cache、pecl-cache），构建不依赖容器内网络
 $body
 RUN usermod -u \${UID} www-data && groupmod -g \${GID} www-data
 DEOF
@@ -321,8 +339,8 @@ _php_mirror_host_args() {
 # 命中副本的母本在备份库不受影响，留在磁盘上只是垃圾。暂存标记同步清空，防止后续误晋升
 _php_discard_staging() {
   local build_dir=$1
-  rm -rf "$build_dir/php-exts" "$build_dir/php-pkgs"
-  _PECL_STAGED="" ; _APK_STAGED=""
+  rm -rf "$build_dir/pecl" "$build_dir/apk"
+  _PECL_STAGED=""
 }
 
 # 执行镜像构建并收尾：成功→暂存包验证晋升入备份库（pecl + apk 闭包）；
@@ -337,8 +355,7 @@ _php_docker_build_verified() {
     _php_discard_staging "$build_dir"
     error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
   fi
-  _php_promote_pecl_tarballs "$ver" "$build_dir/php-exts"
-  _php_promote_apk_closure "$ver" "$build_dir/php-pkgs"
+  _php_promote_pecl_tarballs "$ver" "$build_dir/pecl"
 }
 
 # 在线路径的 docker build 参数（镜像源预解析注入、代理、no_proxy），stdout 每行一个参数。
@@ -372,25 +389,27 @@ _php_build_image() {
 
   local remote_files=""
   if [ -n "$remote" ]; then
-    rm -rf "$build_dir/php-exts"
-    mkdir -p "$build_dir/php-exts"
+    rm -rf "$build_dir/pecl"
+    mkdir -p "$build_dir/pecl"
     _php_stage_pecl_tarballs "$ver" "$remote" "$build_dir"
     local tgz
-    for tgz in "$build_dir"/php-exts/*.tgz; do
+    for tgz in "$build_dir"/pecl/*.tgz; do
       remote_files="$remote_files $(basename "$tgz")"
     done
     remote_files="${remote_files# }"
   fi
 
-  # apk 离线闭包：备份命中或预取成功 → 离线路径；预取失败 → 在线路径兜底
+  # apk 离线闭包：备份命中或预取成功 → 离线路径；预取失败 → 在线路径兜底。
+  # apk 先清空重建：预取容器以 root 写入的历史残留会让宿主 cp 覆盖时权限不足
   local apk_mirror="${APK_MIRROR:-}" build_args=() offline=0
-  mkdir -p "$build_dir/php-pkgs"
-  if _php_stage_apk_closure "$ver" "$deps_union" "$build_dir/php-pkgs"; then offline=1; fi
+  rm -rf "$build_dir/apk"
+  mkdir -p "$build_dir/apk"
+  if _php_stage_apk_closure "$ver" "$deps_union" "$build_dir/apk"; then offline=1; fi
   _php_render_dockerfile "$ver" "$bundled" "$remote_files" $offline > "$build_dir/Dockerfile"
 
   if [ "$offline" = "1" ]; then
     apk_mirror=""
-    log "离线构建 PHP $ver：apk 闭包 $(ls "$build_dir/php-pkgs" | wc -l) 个包，pecl 包全部本地"
+    log "离线构建 PHP $ver：apk 闭包 $(ls "$build_dir/apk" | wc -l) 个包，pecl 包全部本地"
   else
     local proxy; proxy=$(_php_resolve_build_proxy)
     if [ "$proxy" != "none" ] && [ -z "$apk_mirror" ]; then apk_mirror="https://mirrors.aliyun.com"; fi
@@ -402,7 +421,7 @@ _php_build_image() {
   _php_docker_build_verified "$img" "$build_dir" "$ver" \
     --build-arg UID="$CURRENT_UID" \
     --build-arg GID="$CURRENT_GID" \
-    --build-arg APK_MIRROR="$apk_mirror" \
+    --build-arg APK_MIRRORS="$APK_MIRRORS" \
     "${build_args[@]}"
 
   echo "$img"
@@ -514,13 +533,32 @@ _php_install() {
   success "PHP ${ver} 安装完成"
 }
 
+# 只安装了一个 PHP 版本时返回其版本号（stdout）；零个或多个时给出明确指引并失败。
+# 供 extension add/remove 省略版本参数时推断使用
+_php_infer_installed_version() {
+  local versions=() f
+  for f in "$EXT_DIR"/php-*.yml; do
+    [ -f "$f" ] || continue
+    versions+=("$(basename "$f" .yml | sed 's/php-//')")
+  done
+  case ${#versions[@]} in
+    0) error "尚未安装任何 PHP 版本，请先 phpbox php install <版本>" ;;
+    1) echo "${versions[0]}" ;;
+    *) error "存在多个 PHP 版本（${versions[*]}），请显式指定: phpbox php extension <add|remove> <版本> <扩展名>" ;;
+  esac
+}
+
 _php_extension_op() {
   local sub="${1:-}"
   local ver="${2:-}"
   local ext="${3:-}"
   [ -z "$sub" ] && error "用法: phpbox php extension {add|remove} <版本> <扩展名>"
-  [ -z "$ver" ] && error "请指定 PHP 版本"
-  [ -z "$ext" ] && error "请指定扩展名"
+  # 版本推断：只装了一个 PHP 版本时允许省略版本参数（ver 缺省才推断，显式给了就尊重）
+  if [ -z "$ver" ]; then
+    ver=$(_php_infer_installed_version)
+    log "已推断 PHP 版本: $ver"
+  fi
+  [ -z "$ext" ] && error "用法: phpbox php extension $sub <版本> <扩展名>（例: phpbox php extension add 8.0 xdebug）"
   validate_version "$ver"
   [[ "$ver" == 5.* || "$ver" == 7.* || "$ver" == 8.* ]] || error "PHP 不存在 ${ver%%.*}.x 版本，可用版本线: 5.6 / 7.x / 8.x"
   _php_validate_extensions "$ext"
