@@ -9,7 +9,10 @@
 # 删除数据目录里的这个链接无副作用
 _mysql_clean_stale_sock() {
   local ver=$1
-  rm -f "${MYSQL_DATA_ROOT:?}/${ver}/mysql.sock"
+  # 尽力而为：成功安装过一次后数据目录整体归 999，宿主用户对目录无写权限、unlink 必失败；
+  # 权威清理在 yml 的 entrypoint 覆盖里（容器内以 root 执行），此处只兜住目录仍可写的场景。
+  # 不能让本函数失败：set -e 会把整个安装拦死在权限上
+  rm -f "${MYSQL_DATA_ROOT:?}/${ver}/mysql.sock" 2>/dev/null || true
 }
 
 _mysql_generate_compose() {
