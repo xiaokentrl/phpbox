@@ -61,6 +61,10 @@ cmd_backup() {
   backup_items+=("$CONFIG_DIR")
   # STATE_DIR 保存各 PHP 版本的扩展清单，缺失会导致恢复后扩展元数据丢失
   backup_items+=("$STATE_DIR")
+  # OFFLINE_DIR 是 pecl 源码包与 apk 依赖闭包的离线备份库，带走它换机后构建零下载
+  if [ -d "$OFFLINE_DIR" ]; then
+    backup_items+=("$OFFLINE_DIR")
+  fi
   if [ -d "$WWW_ROOT" ]; then
     backup_items+=("$WWW_ROOT")
   fi

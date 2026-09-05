@@ -78,6 +78,9 @@ load_env() {
   CURRENT_UID="${CURRENT_UID:-$(id -u)}"
   CURRENT_GID="${CURRENT_GID:-$(id -g)}"
   MYSQL_DATA_ROOT="${MYSQL_DATA_ROOT:-$HOME/mysql-data}"
+  # 离线备份库：pecl 源码包与 apk 依赖闭包的持久备份（按分类/PHP 版本分目录），
+  # 命中即离线构建，换机随 phpbox backup 迁移
+  OFFLINE_DIR="${OFFLINE_DIR:-$BASE_DIR/offline}"
   # PHP 缺省安装的扩展集（php install 不带 --extensions 时生效）。
   # curl/openssl/mbstring/pdo/sqlite3/xml/xmlwriter/xmlreader/simplexml/dom/fileinfo
   # 以及 sodium/pcntl/posix 等已编译进 php-fpm-alpine 镜像，无需也不能重复安装；
@@ -91,7 +94,7 @@ load_env() {
   APK_MIRROR="${APK_MIRROR:-}"
   BUILD_PROXY="${BUILD_PROXY:-auto}"
 
-  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR BUILD_PROXY
+  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR BUILD_PROXY OFFLINE_DIR
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
   mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$STATE_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
 
