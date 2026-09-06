@@ -340,7 +340,7 @@ echo "== 8. 离线 Dockerfile：依赖层必须先于一切编译 =="
 # phpize 因找不到 autoconf 失败（Cannot find autoconf）
 OFFLINE_DF=$(bash -c "
   set -uo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/build.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
   _php_render_dockerfile 8.0 'bcmath,gd' 'imagick.tgz redis.tgz' 1")
 DEPS_N=$(echo "$OFFLINE_DF" | grep -n "apk add --no-network /tmp/apk" | cut -d: -f1)
 PECL_N=$(echo "$OFFLINE_DF" | grep -n "pecl install" | cut -d: -f1)
@@ -354,7 +354,7 @@ fi
 if [ "$COPY_N" -eq 1 ]; then ok "离线：COPY pecl 恰好出现一次"; else bad "离线：COPY pecl 出现 $COPY_N 次（应为 1）"; fi
 ONLINE_DF=$(bash -c "
   set -uo pipefail; export HOME=$HOME; cd '$ROOT'
-  source '$ROOT/lib/common.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
+  source '$ROOT/lib/common.sh'; source '$ROOT/lib/build.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
   _php_render_dockerfile 8.0 'bcmath,gd' 'imagick.tgz redis.tgz' 0")
 DEPS_N=$(echo "$ONLINE_DF" | grep -n 'PHPIZE_DEPS' | head -1 | cut -d: -f1)
 PECL_N=$(echo "$ONLINE_DF" | grep -n "pecl install" | cut -d: -f1)
