@@ -106,7 +106,7 @@ _php_cleanup_images() {
 
 _php_install() {
   local ver="${1:-}"
-  [ -z "$ver" ] && error "用法: phpbox php install <版本> [--extensions 扩展列表]"
+  [ -z "$ver" ] && error "用法: phpbox php install <版本> [--ext 扩展列表]"
   validate_version "$ver"
   # 版本线守门：php:X-fpm-alpine 官方镜像只发布过 5.x / 7.x / 8.x
   [[ "$ver" == 5.* || "$ver" == 7.* || "$ver" == 8.* ]] || error "PHP 不存在 ${ver%%.*}.x 版本，可用版本线: 5.6 / 7.x / 8.x"
@@ -115,8 +115,8 @@ _php_install() {
   local exts=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --extensions)
-        [ $# -ge 2 ] || error "--extensions 需要指定扩展列表"
+      --ext|--extensions)
+        [ $# -ge 2 ] || error "--ext 需要指定扩展列表"
         exts="$2"; shift 2 ;;
       *) error "未知选项: $1" ;;
     esac
@@ -128,7 +128,7 @@ _php_install() {
     error "PHP ${ver} 已安装，如需修改扩展请使用 'phpbox php extension add/remove'"
   fi
   _install_rollback_begin "php" "$ver"
-  # 未指定 --extensions 时采用默认扩展集（.env 的 PHP_DEFAULT_EXTENSIONS 可覆盖）
+  # 未指定 --ext 时采用默认扩展集（.env 的 PHP_DEFAULT_EXTENSIONS 可覆盖）
   if [ -z "$exts" ]; then
     exts="$PHP_DEFAULT_EXTENSIONS"
   fi

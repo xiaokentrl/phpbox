@@ -45,7 +45,7 @@ phpbox list                             # 查看已安装服务
 
 | 命令 | 说明 |
 | --- | --- |
-| `phpbox php install <版本> [--extensions 扩展列表]` | 安装 PHP；不带 `--extensions` 时安装 `PHP_DEFAULT_EXTENSIONS` |
+| `phpbox php install <版本> [--ext 扩展列表]` | 安装 PHP；不带 `--ext` 时安装 `PHP_DEFAULT_EXTENSIONS`（`--extensions` 为兼容别名） |
 | `phpbox php extension add <版本> <扩展>` | 添加扩展（自动重建镜像并重载） |
 | `phpbox php extension remove <版本> <扩展>` | 移除扩展 |
 | `phpbox php list` | 列出所有 PHP 实例 |
@@ -111,7 +111,7 @@ phpbox list                             # 查看已安装服务
 | `CURRENT_UID` / `CURRENT_GID` | 当前用户 | 容器内 `www-data` 对齐宿主机属主，避免文件权限问题 |
 | `NGINX_PORT` | `80` | Nginx 宿主端口 |
 | `NGINX_VERSION` | `alpine` | Nginx 镜像 tag；换 tag 只换主配置目录，站点目录不变 |
-| `PHP_DEFAULT_EXTENSIONS` | 见 `.env.example` | `php install` 不带 `--extensions` 时的默认扩展集 |
+| `PHP_DEFAULT_EXTENSIONS` | 见 `.env.example` | `php install` 不带 `--ext` 时的默认扩展集 |
 | `MYSQL_<去点版本>_PORT` / `MYSQL_<去点版本>_ROOT_PASSWORD` | `3380`/`3384`、自动生成 | 如 `MYSQL_84_PORT`、`MYSQL_84_ROOT_PASSWORD`；安装前预置密码即生效 |
 | `*_SERVICE_PREFIX`、`*_SEPARATOR`、`IMAGE_PREFIX` | 见 `.env.example` | 容器名 / 镜像 tag / 标签的命名规则 |
 
