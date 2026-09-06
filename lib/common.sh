@@ -43,6 +43,16 @@ confirm_yes() {
   [[ "$ans" == "y" || "$ans" == "Y" ]]
 }
 
+# 剥掉值两端成对包裹的单/双引号。.env 惯例允许带引号的值（含空格的 APK_MIRRORS 列表必需），
+# 不剥则引号被并入值：load_env 侧首尾 URL 带上引号直接失效，read_env_value 侧端口变成 "8080"
+_env_strip_quotes() {
+  case "$1" in
+    \"*\") echo "${1:1:${#1}-2}" ;;
+    \'*\') echo "${1:1:${#1}-2}" ;;
+    *)     echo "$1" ;;
+  esac
+}
+
 # 解析并归一化 Alpine 镜像源列表（结果写入全局 APK_MIRRORS，空格分隔）。
 # APK_MIRRORS 已配置 → 每个源补全 /alpine 后缀（ICM 镜像的路径前缀不同）；
 # 未配置 → 默认 阿里云主源 + 官方 CDN 兜底；兼容旧变量 APK_MIRROR（作为首源并入）
@@ -61,11 +71,14 @@ _load_apk_mirrors() {
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
-    # IFS='=' 使 read 按等号拆分：key 取第一段，剩余全部并入 value（密码含 = 也不会截断）
-    while IFS='=' read -r key value; do
+    # IFS='=' 使 read 按等号拆分：key 取第一段，剩余全部并入 value（密码含 = 也不会截断）。
+    # read 读到"无换行符的末行"时返回非零——循环体会整行跳过，最后一行配置被静默丢弃
+    # （实测：末行的 APK_MIRRORS 丢失后回退默认镜像源），故以 || [ -n "$key" ] 收编末行
+    while IFS='=' read -r key value || [ -n "$key" ]; do
       [[ "$key" =~ ^[[:space:]]*# ]] && continue   # 注释行（允许行首空白）：跳过
       [[ -z "$key" ]] && continue                  # 空行：跳过
       value="${value%$'\r'}"                       # 去掉行尾 \r，兼容 Windows 换行编辑过的 .env
+      value=$(_env_strip_quotes "$value")
       export "$key"="$value"                       # 键名以字符串形式给出，逐行导出为环境变量
     done < "$ENV_FILE"
   fi
@@ -92,7 +105,7 @@ load_env() {
   # 离线备份库：pecl 源码包与 apk 依赖闭包的持久备份（按分类/PHP 版本分目录），
   # 命中即离线构建，换机随 phpbox backup 迁移
   OFFLINE_DIR="${OFFLINE_DIR:-$BASE_DIR/offline}"
-  # PHP 缺省安装的扩展集（php install 不带 --extensions 时生效）。
+  # PHP 缺省安装的扩展集（php install 不带 --ext 时生效）。
   # curl/openssl/mbstring/pdo/sqlite3/xml/xmlwriter/xmlreader/simplexml/dom/fileinfo
   # 以及 sodium/pcntl/posix 等已编译进 php-fpm-alpine 镜像，无需也不能重复安装；
   # mongodb/memcached/sqlsrv/ldap 等低频扩展按需 extension add，不进默认集。
@@ -253,7 +266,8 @@ get_or_set_password() {
 # cut 用 -f2- ：值本身可能含 =（如自定义密码），不能在第二个 = 处截断
 read_env_value() {
   local key=$1 default=$2
-  local val=$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || true)
+  local val=$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true)
+  val=$(_env_strip_quotes "$val")
   echo "${val:-$default}"
 }
 

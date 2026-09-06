@@ -366,6 +366,36 @@ else
 fi
 if [ "$COPY_N" -eq 1 ]; then ok "在线：COPY pecl 恰好出现一次"; else bad "在线：COPY pecl 出现 $COPY_N 次（应为 1）"; fi
 
+echo "== 9. load_env 边界：末行无换行 + 引号剥离 =="
+# 回归背景一：while read 对"无换行符的末行"返回非零，循环体整行跳过——末行的
+# APK_MIRRORS 配置被静默丢弃，静默回退默认镜像源（用户配置形同虚设）
+cp "$HOME/phpbox/.env" "$HOME/phpbox/.env.bak"
+printf 'PROJECT_NAME=phpbox\nAPK_MIRRORS="https://m1.test/alpine https://m2.test/alpine"\nLASTKEY=last-value' > "$HOME/phpbox/.env"
+bash -c "
+  set -uo pipefail; export HOME=$HOME
+  source '$ROOT/lib/common.sh'; load_env 2>/dev/null
+  [ \"\$PROJECT_NAME\" = 'phpbox' ] || exit 10
+  [ \"\$LASTKEY\" = 'last-value' ] || exit 11
+  [ \"\$APK_MIRRORS\" = 'https://m1.test/alpine https://m2.test/alpine' ] || exit 12
+" >/dev/null 2>&1
+case $? in
+  0)  ok "load_env: 无换行末行被读取且引号被剥离" ;;
+  10) bad "load_env: 基础键读取失败" ;;
+  11) bad "load_env: 无换行末行被整行丢弃（read 返回非零跳过循环体）" ;;
+  12) bad "load_env: 带引号的值未剥离引号（首个 URL 带前引号、末 URL 追加了 /alpine）" ;;
+  *)  bad "load_env: 边界用例异常退出" ;;
+esac
+# 回归背景二：read_env_value 与 load_env 必须对引号、重复键（后键覆盖）语义一致
+echo 'NGINX_PORT="8080"' >> "$HOME/phpbox/.env"
+echo 'NGINX_PORT=9090'   >> "$HOME/phpbox/.env"
+if [ "$(read_env_value "NGINX_PORT" "")" = "9090" ]; then
+  ok "read_env_value: 引号剥离且重复键后键覆盖（与 load_env 一致）"
+else
+  bad "read_env_value: 引号/重复键语义不一致（得到 $(read_env_value "NGINX_PORT" "")）"
+fi
+mv "$HOME/phpbox/.env.bak" "$HOME/phpbox/.env"
+load_env 2>/dev/null   # 还原夹具，避免影响 .env 保真等后续判定
+
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
 [ "$FAIL" -eq 0 ]

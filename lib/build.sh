@@ -103,6 +103,54 @@ _php_promote_pecl_tarballs() {
   _PECL_STAGED=""
 }
 
+# apk 闭包预取容器：向空 root 全新安装，把"必然完整"的依赖闭包拉到 $dest。
+# apk 对中断的连接无读超时、会永久挂死（实测拉到 21 个包后停摆），双重保险：
+# 容器内 timeout+重试先止血；宿主侧 timeout 兜底。容器取固定名——客户端被
+# timeout 杀掉时容器会残留并挂住构建目录，按名强制清理，绝不留孤儿
+_php_apk_prefetch_run() {
+  local ver=$1 deps=$2 dest=$3
+  shift 3   # 余下为 --add-host 参数（可能为空）
+  local cname="phpbox-apkfetch-${ver//./}"
+  docker rm -f "$cname" 2>/dev/null || true   # 上次残留的同名容器会让 run 直接失败，先清
+  if ! timeout 2400 docker run --rm --name "$cname" "$@" -e APK_MIRRORS="$APK_MIRRORS" -e HOST_UID="$CURRENT_UID" -v "$dest":/pkgs \
+      "php:${ver}-fpm-alpine" sh -c '
+        # 多镜像源 repositories：apk 原生按序尝试，单源失败自动切下一个
+        cp /etc/apk/repositories /tmp/repos.orig
+        : > /etc/apk/repositories
+        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
+        # 必须先 apk update：新容器没有缓存的索引，fetch 会就地报 unable to select。
+        # apk_try = timeout 止血 + 重试 3 次（update 3×120s，fetch 3×600s）；输出不吞，逐包即进度
+        apk_try() { local n=1; until "$@"; do n=$((n+1)); [ $n -gt 3 ] && return 1; echo "  重试 $n/3: $*"; done; }
+        apk_try timeout 120 apk update || exit 1
+        apk_try timeout 600 apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS '"$deps"' || exit 1
+        chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
+      '; then
+    docker rm -f "$cname" 2>/dev/null || true
+    return 1
+  fi
+}
+
+# 基础包同步容器：把基础镜像的全量包按当前镜像源版本补进暂存（钉死库版本与前进的
+# 镜像源之间会 breaks，作用见调用方注释）。尽力而为：失败返回 1，由调用方仅告警
+_php_apk_basesync_run() {
+  local ver=$1 dest=$2
+  shift 2
+  local sync_cname="phpbox-basesync-${ver//./}"
+  docker rm -f "$sync_cname" 2>/dev/null || true
+  if ! timeout 1800 docker run --rm --name "$sync_cname" "$@" -e APK_MIRRORS="$APK_MIRRORS" -v "$dest":/pkgs \
+      "php:${ver}-fpm-alpine" sh -c '
+        cp /etc/apk/repositories /tmp/repos.orig
+        : > /etc/apk/repositories
+        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
+        apk_try() { local n=1; until "$@"; do n=$((n+1)); [ $n -gt 2 ] && return 1; done; }
+        apk_try timeout 120 apk update >/dev/null
+        apk_try timeout 900 apk fetch -o /pkgs $(apk info -q) 2>/dev/null
+      ' >/dev/null 2>&1; then
+    docker rm -f "$sync_cname" 2>/dev/null || true
+    return 1
+  fi
+}
+
 # 宿主机侧暂存 apk 依赖闭包到构建上下文：优先命中按版本隔离的备份库
 # （offline/php/<版本>/apk/，整批对应一个 PHP 版本，预取并试装成功后立即入库），未命中时
 # 借助与目标镜像同源的辅助容器，向一个空 root 做一次"全新安装"——apk 只下载缺失的包，
@@ -125,37 +173,17 @@ _php_stage_apk_closure() {
     cp "$backup_dir"/*.apk "$dest/"
   else
     log "apk 闭包预取: 宿主容器内 apk fetch --recursive → $dest/（$ver，$(wc -w <<<"$deps") 个包）"
-  if ! docker run --rm "${addhost[@]}" -e APK_MIRRORS="$APK_MIRRORS" -e HOST_UID="$CURRENT_UID" -v "$dest":/pkgs \
-      "php:${ver}-fpm-alpine" sh -c '
-        # 多镜像源 repositories：apk 原生按序尝试，单源失败自动切下一个
-        cp /etc/apk/repositories /tmp/repos.orig
-        : > /etc/apk/repositories
-        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
-        # 必须先 apk update：新容器没有缓存的索引，fetch 会就地报 unable to select
-        apk update >/dev/null
-        apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS '"$deps"' >/dev/null
-        chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
-      '; then
-    log "警告：apk 闭包预取失败，本次构建降级为在线安装（备份库保持为空，下次构建自动重试）"
-    rm -rf "$dest"
-    return 1
-  fi
-  mkdir -p "$backup_dir"
-  cp "$dest"/*.apk "$backup_dir/" 2>/dev/null || true
-  log "apk 闭包已入备份库: offline/php/$ver/apk/（$(ls "$backup_dir" | wc -l) 个包）"
+    if ! _php_apk_prefetch_run "$ver" "$deps" "$dest" "${addhost[@]}"; then
+      log "警告：apk 闭包预取失败，本次构建降级为在线安装（备份库保持为空，下次构建自动重试）"
+      rm -rf "$dest"
+      return 1
+    fi
   fi
   # 基础包同步（重要）：基础镜像"钉死库版本"的包（openssl 等不在依赖闭包里），
   # 镜像源前进后其精确 pin 会与闭包里的新库 breaks——把基础镜像的全量包
   # 按当前镜像源版本补进暂存，离线安装时整个基础系统一起升级，版本重新对齐。
   # 离线场景此步会失败：容忍（未漂移时旧闭包仍可用；已漂移则需联网重试一次）
-  if ! docker run --rm "${addhost[@]}" -e APK_MIRRORS="$APK_MIRRORS" -v "$dest":/pkgs \
-      "php:${ver}-fpm-alpine" sh -c '
-        cp /etc/apk/repositories /tmp/repos.orig
-        : > /etc/apk/repositories
-        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
-        apk update >/dev/null
-        apk fetch -o /pkgs $(apk info -q) 2>/dev/null
-      ' >/dev/null 2>&1; then
+  if ! _php_apk_basesync_run "$ver" "$dest" "${addhost[@]}"; then
     log "警告：基础包同步失败（离线场景可忽略）；若构建报 breaks 版本冲突，请联网重试一次"
   fi
   # 暂存集 = 依赖闭包 + 基础镜像全量包（当前镜像源版本）= 可离线安装的一致状态。晋升备份库
