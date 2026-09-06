@@ -175,7 +175,7 @@ _php_stage_apk_closure() {
 # 全部扩展的依赖一次性装进独立 RUN 层并缓存：失败重试/重建不再重复下载数百 MiB；
 # 映射未覆盖的依赖由 IPE 按名自行安装（网络路径照旧），此处缺失只会变慢不会失败
 _PHP_BUILD_BASE_APK_DEPS="musl-dev linux-headers pkgconf re2c"
-_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev,libwebp-dev,zlib-dev,libxpm-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
+_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev,libwebp-dev,zlib-dev,zlib-dev,libxpm-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
 
 _php_ext_apk_deps() {
   local names=${1//,/ } ext pair out="$_PHP_BUILD_BASE_APK_DEPS"
