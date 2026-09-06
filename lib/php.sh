@@ -260,38 +260,17 @@ ARG GID=1000
 ARG APK_MIRRORS="https://mirrors.aliyun.com/alpine https://dl-cdn.alpinelinux.org/alpine"
 RUN cp /etc/apk/repositories /tmp/repos.orig && : > /etc/apk/repositories && \
   for m in \$APK_MIRRORS; do case "\$m" in */alpine) : ;; *) m="\$m/alpine" ;; esac; sed "s|https://dl-cdn.alpinelinux.org/alpine|\$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
-# 依赖与源码包全部来自宿主机侧本地备份（apk-cache、pecl-cache），构建不依赖容器内网络
+# 依赖与源码包全部来自宿主机侧本地备份（offline/apk、offline/pecl），构建不依赖容器内网络
 $body
 RUN usermod -u \${UID} www-data && groupmod -g \${GID} www-data
 DEOF
 }
 
-# 归一化代理地址并改写为构建容器可达的宿主地址，stdout 输出最终值。
-# 原生 docker 的构建容器里 host.docker.internal 默认不解析（Desktop VM 才内置该域名），
-# 换引擎后 pecl 全部死于 DNS；直接改用 docker0 网关 IP（容器内零 DNS 可达），
-# 取不到再退回域名并由 build_args 的 --add-host host-gateway 兜底
-_php_resolve_build_proxy() {
-  local proxy=$1
-  case "$proxy" in
-    http://*|https://*) : ;;
-    *) proxy="http://${proxy}" ;;
-  esac
-  local proxy_gw=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
-  if [ -n "$proxy_gw" ]; then
-    proxy="${proxy//127.0.0.1/$proxy_gw}"
-    proxy="${proxy//localhost/$proxy_gw}"
-  else
-    proxy="${proxy//127.0.0.1/host.docker.internal}"
-    proxy="${proxy//localhost/host.docker.internal}"
-  fi
-  echo "$proxy"
-}
-
 # 解析 BUILD_PROXY 为容器可达的最终代理地址，stdout 输出（none 或 http://URL）。
 # none=禁用；auto（默认）=探测本地常见代理端口；其余按显式值（host:port 或完整 URL）。
-# 原生 docker 的构建容器里 host.docker.internal 默认不解析（Desktop VM 才内置该域名），
-# 换引擎后 pecl 全部死于 DNS：代理指向本机时改写为 docker0 网关 IP（容器内零 DNS 可达），
-# 取不到再退回域名，并由调用方的 --add-host host-gateway 兜底
+# 代理地址归一化：原生 docker 的构建容器里 host.docker.internal 默认不解析（Desktop VM
+# 才内置该域名），换引擎后 pecl 全部死于 DNS——代理指向本机时改写为 docker0 网关 IP
+# （容器内零 DNS 可达），取不到再退回域名，并由调用方的 --add-host host-gateway 兜底
 _php_resolve_build_proxy() {
   local proxy="${BUILD_PROXY:-auto}"
   if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
@@ -356,6 +335,10 @@ _php_docker_build_verified() {
     error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
   fi
   _php_promote_pecl_tarballs "$ver" "$build_dir/pecl"
+  # 晋升完成后清空两个暂存目录：正本在备份库（offline/php/<版本>/），残留只是垃圾，
+  # 且 config/php/<版本>/{pecl,apk} 会被 phpbox backup 经 CONFIG_DIR 卷入造成双份冗余。
+  # 下次构建会从备份库重新复制，零损失
+  rm -rf "$build_dir/pecl" "$build_dir/apk"
 }
 
 # 在线路径的 docker build 参数（镜像源预解析注入、代理、no_proxy），stdout 每行一个参数。
@@ -401,19 +384,17 @@ _php_build_image() {
 
   # apk 离线闭包：备份命中或预取成功 → 离线路径；预取失败 → 在线路径兜底。
   # apk 先清空重建：预取容器以 root 写入的历史残留会让宿主 cp 覆盖时权限不足
-  local apk_mirror="${APK_MIRROR:-}" build_args=() offline=0
+  local build_args=() offline=0
   rm -rf "$build_dir/apk"
   mkdir -p "$build_dir/apk"
   if _php_stage_apk_closure "$ver" "$deps_union" "$build_dir/apk"; then offline=1; fi
   _php_render_dockerfile "$ver" "$bundled" "$remote_files" $offline > "$build_dir/Dockerfile"
 
   if [ "$offline" = "1" ]; then
-    apk_mirror=""
     log "离线构建 PHP $ver：apk 闭包 $(ls "$build_dir/apk" | wc -l) 个包，pecl 包全部本地"
   else
     local proxy; proxy=$(_php_resolve_build_proxy)
-    if [ "$proxy" != "none" ] && [ -z "$apk_mirror" ]; then apk_mirror="https://mirrors.aliyun.com"; fi
-    mapfile -t build_args < <(_php_online_build_args "$proxy" "$apk_mirror")
+    mapfile -t build_args < <(_php_online_build_args "$proxy" "${APK_MIRRORS%% *}")
     if [ "$proxy" != "none" ]; then log "在线构建 PHP $ver（流量经代理: $proxy）"; else log "在线构建 PHP $ver（直连）"; fi
   fi
 

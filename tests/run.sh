@@ -62,6 +62,9 @@ _php_build_image() { echo "stub-image"; }
 init_config_files() { :; }
 # 本套件不依赖 daemon（compose config 是纯客户端渲染），桩掉 daemon 预检以维持该契约
 require_docker() { :; }
+# common.sh 的 source-time trap（半安装回滚）会覆盖套件的清理 trap——source 后重设，
+# 否则每次测试运行泄漏整个临时 HOME（/tmp/tmp.XXX 含完整 phpbox 夹具）
+trap 'rm -rf "$HOME"' EXIT
 load_env
 
 echo "== 1. 生成服务 yml 并渲染（路径解析/环境变量/卷名）=="

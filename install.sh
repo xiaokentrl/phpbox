@@ -1,10 +1,10 @@
-#phpbox仅用于本地开发环境,一切以本地开发为主,力求代码简单明了，力求新手一看就能看懂代码，力求适合人类阅读习惯，力求最佳实践。
 #!/bin/bash
+# phpbox 仅用于本地开发环境：力求代码简单明了、新手一看就懂、适合人类阅读习惯、符合最佳实践。
 set -euo pipefail
 
 echo ">>> 创建目录结构..."
 # sites 是唯一的站点目录（每个站点一个 <域名>.conf），不随 Nginx 版本变化，故不建 conf.d
-mkdir -p ~/phpbox/{bin,lib,compose/services,config/{php,mysql,nginx/sites},logs/{nginx,php},backups,state,data}
+mkdir -p ~/phpbox/{bin,lib,compose/services,config/{php,mysql,nginx/sites},logs/{nginx,php},backups,state}
 
 echo ">>> 复制 CLI 源码..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +48,7 @@ MYSQL_DATA_ROOT=$HOME/mysql-data
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)
 NGINX_PORT=80
+NGINX_VERSION=alpine
 PHP_SERVICE_PREFIX=php
 MYSQL_SERVICE_PREFIX=mysql
 REDIS_SERVICE_PREFIX=redis
@@ -56,6 +57,8 @@ LABEL_SEPARATOR=-
 IMAGE_TAG_SEPARATOR=-
 BACKUP_NAME_SEPARATOR=-
 IMAGE_PREFIX=phpbox
+PHP_DEFAULT_EXTENSIONS=gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug
+BUILD_PROXY=auto
 ENVEOF
     echo "已生成 .env，请根据实际情况调整（如 WWW_ROOT、MYSQL_DATA_ROOT）"
 fi
