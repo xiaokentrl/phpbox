@@ -123,6 +123,20 @@ _php_apk_basesync_run() {
   _apk_ranked_fetch_run "php:${ver}-fpm-alpine" "phpbox-basesync-${ver//./}" 1800 installed "$dest"
 }
 
+# 闭包完整性校验：phpize 工具链的关键包必须都在（按文件名前缀匹配，如 autoconf-2.73.apk）。
+# 缺失即预取/备份命中了一份残缺闭包，返回 1 由调用方降级在线路径——离线构建缺它必死于
+# "Cannot find autoconf"
+_php_apk_closure_verify() {
+  local dest=$1 need missing=""
+  for need in autoconf gcc g++ make pkgconf re2c musl-dev linux-headers file dpkg; do
+    ls "$dest/${need}-"*.apk >/dev/null 2>&1 || missing="$missing $need"
+  done
+  if [ -n "$missing" ]; then
+    log "apk 闭包缺少构建依赖:${missing}"
+    return 1
+  fi
+}
+
 # 宿主机侧暂存 apk 依赖闭包到构建上下文：优先命中按版本隔离的备份库
 # （offline/php/<版本>/apk/，整批对应一个 PHP 版本，预取并试装成功后立即入库），未命中时
 # 借助与目标镜像同源的辅助容器，向一个空 root 做一次"全新安装"——apk 只下载缺失的包，
@@ -137,13 +151,28 @@ _php_stage_apk_closure() {
   mkdir -p "$dest"
   log "apk 闭包备份库: $backup_dir → 构建目录: $dest"
   log "apk 镜像源（先测速排序，超时 $APK_TIMEOUT 秒自动切换）: $APK_MIRRORS"
+  local hit=0
   if [ -n "$(ls -A "$backup_dir" 2>/dev/null)" ]; then
     log "apk 闭包命中: $backup_dir → $dest/（$(ls "$backup_dir" | wc -l) 个包）"
     cp "$backup_dir"/*.apk "$dest/"
-  else
+    if _php_apk_closure_verify "$dest"; then
+      hit=1
+    else
+      # 备份命中残缺集（如人工补包只补了一半）：不信任，重新预取，成功后自动覆盖备份库
+      log "警告：备份库闭包残缺，忽略并重新预取"
+      rm -rf "$dest"
+      mkdir -p "$dest"
+    fi
+  fi
+  if [ "$hit" = 0 ]; then
     log "apk 闭包预取: 宿主容器内 apk fetch → $dest/（$ver，$(wc -w <<<"$deps") 个包）"
     if ! _php_apk_prefetch_run "$ver" "$deps" "$dest"; then
-      log "警告：apk 闭包预取失败，本次构建降级为在线安装（备份库保持为空，下次构建自动重试）"
+      log "警告：apk 闭包预取失败，本次构建降级为在线安装（下次构建自动重试）"
+      rm -rf "$dest"
+      return 1
+    fi
+    if ! _php_apk_closure_verify "$dest"; then
+      log "警告：预取闭包不完整，本次构建降级为在线安装"
       rm -rf "$dest"
       return 1
     fi

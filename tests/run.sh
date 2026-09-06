@@ -376,10 +376,37 @@ echo "== 8b. apk 下载器：源测速 + 无响应切换（公共层） =="
 assert_contains "apk 下载器: 用前逐源测速（索引下载计时）" "$_APK_FETCH_SCRIPT" "APKINDEX.tar.gz"
 assert_contains "apk 下载器: 按测速结果排序（最快优先）" "$_APK_FETCH_SCRIPT" "sort -n"
 assert_contains "apk 下载器: 索引获取超时可配置" "$_APK_FETCH_SCRIPT" 'timeout $APK_TIMEOUT apk update'
+assert_contains "apk 下载器: 索引部分失败不放弃整源（community 缺失不拖垮 main）" "$_APK_FETCH_SCRIPT" "仍尝试解析下载"
+assert_contains "apk 下载器: 源级内容验收（apk fetch 假阳性退出 0 不再蒙混过关）" "$_APK_FETCH_SCRIPT" "该源闭包不完整"
+assert_contains "apk 闭包: 备份残缺自愈（忽略并重新预取）" "$(declare -f _php_stage_apk_closure)" "忽略并重新预取"
 assert_contains "apk 下载器: 下载进度双指标看门狗（目录大小+网卡流量）" "$_APK_FETCH_SCRIPT" "eth0"
 assert_contains "apk 下载器: 超时无进展杀掉并切换下一个源" "$_APK_FETCH_SCRIPT" "秒无响应"
 assert_contains "apk 下载器: 公共函数驱动测速脚本" "$(declare -f _apk_ranked_fetch_run)" "_APK_FETCH_SCRIPT"
 assert_contains "apk 下载器: PHP 预取/基础包同步委托公共函数" "$(declare -f _php_apk_prefetch_run _php_apk_basesync_run)" "_apk_ranked_fetch_run"
+# 回归背景：清空 /pkgs 曾对两种模式都生效，基础包同步把预取闭包删得只剩基础镜像自带
+# 包（41 个），离线构建 phpize 报 Cannot find autoconf。清空必须仅存在于递归模式
+if [ "$(grep -c 'rm -f /pkgs' <<<"$_APK_FETCH_SCRIPT")" = "1" ] && grep -q 'recursive) rm -f /pkgs' <<<"$_APK_FETCH_SCRIPT"; then
+  ok "apk 下载器: /pkgs 清空仅发生在递归模式（基础包同步为增量补充）"
+else
+  bad "apk 下载器: /pkgs 清空范围错误（会抹掉预取闭包或缺失）"
+fi
+# 闭包完整性守卫：缺 phpize 工具链即降级在线路径，不再死于 Cannot find autoconf
+GUARD=$(mktemp -d)
+touch "$GUARD"/autoconf-1.apk "$GUARD"/gcc-1.apk "$GUARD"/g++-1.apk "$GUARD"/make-1.apk \
+      "$GUARD"/pkgconf-1.apk "$GUARD"/re2c-1.apk "$GUARD"/musl-dev-1.apk \
+      "$GUARD"/linux-headers-1.apk "$GUARD"/file-1.apk "$GUARD"/dpkg-1.apk
+if _php_apk_closure_verify "$GUARD" >/dev/null 2>&1; then
+  ok "闭包守卫: 工具链齐全时放行"
+else
+  bad "闭包守卫: 完整闭包被误判"
+fi
+rm -f "$GUARD"/make-1.apk
+if ! _php_apk_closure_verify "$GUARD" >/dev/null 2>&1; then
+  ok "闭包守卫: 缺 make 即拦截"
+else
+  bad "闭包守卫: 残缺闭包被放行"
+fi
+rm -rf "$GUARD"
 
 echo "== 9. load_env 边界：末行无换行 + 引号剥离 =="
 # 回归背景一：while read 对"无换行符的末行"返回非零，循环体整行跳过——末行的

@@ -124,13 +124,20 @@ for m in $ORDER; do
   n=$((n+1))
   echo "== 尝试源 $n/$total: $m =="
   { echo "$m/$VER/main"; echo "$m/$VER/community"; } > /etc/apk/repositories
-  if ! timeout $APK_TIMEOUT apk update >/dev/null 2>&1; then
-    echo "  索引获取失败，换下一个源"
-    continue
-  fi
-  rm -f /pkgs/*.apk 2>/dev/null
+  # 索引获取：瞬时失败很常见（间歇性网络），重试 3 次；彻底失败仍不放弃该源——
+  # 交给 fetch 解析检验（community 缺索引只影响 community 包，main 包照常解析）
+  u=1
+  while [ $u -le 3 ]; do
+    timeout $APK_TIMEOUT apk update >/dev/null 2>&1 && break
+    u=$((u+1))
+    [ $u -le 3 ] && { echo "  索引获取失败，重试 $u/3"; sleep 2; }
+  done
+  [ $u -gt 3 ] && echo "  警告：部分索引获取失败，仍尝试解析下载"
+  # 清空仅在递归闭包模式下发生（换源即重来，闭包必须出自同一源）；
+  # installed（基础包同步）是增量补充——曾因清空对两种模式都生效，把预取闭包删得只剩
+  # 基础镜像自带包（41 个），离线构建 phpize 报 Cannot find autoconf
   case "$MODE" in
-    recursive) apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
+    recursive) rm -f /pkgs/*.apk 2>/dev/null; apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
     installed) apk fetch -o /pkgs $(apk info -q) & ;;
   esac
   apid=$!
@@ -154,9 +161,20 @@ for m in $ORDER; do
     continue
   fi
   if wait $apid; then
-    echo "== 源 $m 下载完成 =="
-    OK=1
-    break
+    # apk fetch 可能对"无法解析"静默返回 0 且零下载（实测：community 索引缺失时整单
+    # 放弃仍退出 0）——按内容验收：phpize 工具链必须落地，缺失视作该源失败换下一个
+    # （与宿主侧 _php_apk_closure_verify 同一套清单，双端把关）
+    verify=1
+    for t in autoconf gcc g++ make pkgconf re2c musl-dev linux-headers file dpkg; do
+      ls /pkgs/$t-*.apk >/dev/null 2>&1 || { verify=0; break; }
+    done
+    if [ "$verify" = 1 ]; then
+      echo "== 源 $m 下载完成 =="
+      OK=1
+      break
+    fi
+    echo "  该源闭包不完整（缺构建工具），换下一个源"
+    continue
   fi
   echo "  下载失败，换下一个源"
 done
