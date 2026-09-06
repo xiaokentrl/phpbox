@@ -52,6 +52,7 @@ echo "PHP_EXTENSIONS=gd,redis" > "$HOME/phpbox/state/php-84-extensions.env"
 
 # 载入真实库；桩掉需要拉镜像/构建的部分
 source "$ROOT/lib/common.sh"
+source "$ROOT/lib/build.sh"
 source "$ROOT/lib/php.sh"
 source "$ROOT/lib/mysql.sh"
 source "$ROOT/lib/redis.sh"
