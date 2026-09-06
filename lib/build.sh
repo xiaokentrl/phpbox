@@ -103,119 +103,19 @@ _php_promote_pecl_tarballs() {
   _PECL_STAGED=""
 }
 
-# 容器内 apk 下载器（prefetch 与 basesync 共用）：源测速排序 + 30 秒无响应自动切换。
-# 1) 用前测速：逐源下载 main 索引计时（30s 上限），不可用源剔除，其余按最快优先排序；
-# 2) 按测速顺序逐源整批下载：索引获取 30s 超时；下载期间以 /pkgs 大小 + 容器网卡流量
-#    为进度双指标，30s 无增长 = 无响应，杀掉当前下载自动切换下一个源。
-# 单引号包裹：脚本的 $ 一律为容器运行时展开。调用:
-#   sh -c "$_PHP_APK_FETCH_SCRIPT" <标签> recursive <包列表...>   # 递归闭包（预取）
-#   sh -c "$_PHP_APK_FETCH_SCRIPT" <标签> installed               # 全量已装包（基础包同步）
-# 闭包必须出自同一源：切换源即清空 /pkgs 重来，避免两个源的版本混装
-_PHP_APK_FETCH_SCRIPT='
-cp /etc/apk/repositories /tmp/repos.orig
-MODE=$1; shift
-VER="v$(cut -d. -f1,2 /etc/alpine-release 2>/dev/null)"
-case "$VER" in
-  v) VER=$(sed -n "s|^https://dl-cdn.alpinelinux.org/alpine/||p" /tmp/repos.orig | head -n1 | cut -d/ -f1) ;;
-esac
-ARCH=$(uname -m)
-RANKED=""
-echo "== 源测速（APKINDEX 下载耗时，30s 上限）=="
-for m in $APK_MIRRORS; do
-  start=$(cut -d" " -f1 /proc/uptime)
-  if timeout 30 wget -T 30 -q -O /dev/null "$m/$VER/main/$ARCH/APKINDEX.tar.gz" 2>/dev/null; then
-    end=$(cut -d" " -f1 /proc/uptime)
-    t=$(awk -v a="$end" -v b="$start" "BEGIN{printf \"%.2f\", a-b}")
-    echo "  可用 $m  ${t}s"
-    RANKED="$RANKED$t $m
-"
-  else
-    echo "  不可用 $m（超时或失败，跳过）"
-  fi
-done
-if [ -n "$RANKED" ]; then
-  ORDER=$(printf "%s" "$RANKED" | sort -n | cut -d" " -f2-)
-else
-  echo "全部源测速失败，退回配置顺序尝试"
-  ORDER="$APK_MIRRORS"
-fi
-n=0
-total=$(printf "%s" "$ORDER" | grep -c .)
-for m in $ORDER; do
-  n=$((n+1))
-  echo "== 尝试源 $n/$total: $m =="
-  { echo "$m/$VER/main"; echo "$m/$VER/community"; } > /etc/apk/repositories
-  if ! timeout 30 apk update >/dev/null 2>&1; then
-    echo "  索引获取失败，换下一个源"
-    continue
-  fi
-  rm -f /pkgs/*.apk 2>/dev/null
-  case "$MODE" in
-    recursive) apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
-    installed) apk fetch -o /pkgs $(apk info -q) & ;;
-  esac
-  apid=$!
-  last="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
-  stall=0
-  dead=""
-  while kill -0 $apid 2>/dev/null; do
-    sleep 5
-    cur="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
-    if [ "$cur" = "$last" ]; then
-      stall=$((stall+5))
-      [ $stall -ge 30 ] && { dead=1; break; }
-    else
-      stall=0; last="$cur"
-    fi
-  done
-  if [ -n "$dead" ]; then
-    kill $apid 2>/dev/null
-    wait $apid 2>/dev/null
-    echo "  30 秒无响应，停止并切换下一个源"
-    continue
-  fi
-  if wait $apid; then
-    echo "== 源 $m 下载完成 =="
-    OK=1
-    break
-  fi
-  echo "  下载失败，换下一个源"
-done
-if [ "$OK" = 1 ]; then
-  chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
-  exit 0
-fi
-echo "全部源均失败"
-exit 1
-'
-
-# apk 闭包预取容器：向空 root 全新安装，把"必然完整"的依赖闭包拉到 $dest。
-# 测速排序与无响应切换逻辑见 _PHP_APK_FETCH_SCRIPT；宿主侧 timeout 兜底。容器取固定名
-# ——客户端被 timeout 杀掉时容器会残留并挂住构建目录，按名强制清理，绝不留孤儿
+# apk 闭包预取：向空 root 全新安装，把"必然完整"的依赖闭包拉到 $dest。
+# 公共实现见 common.sh 的 _apk_ranked_fetch_run（用前测速排序 + APK_TIMEOUT 秒无响应
+# 自动切换下一个源）；此处只绑定 PHP 基础镜像与递归闭包模式
 _php_apk_prefetch_run() {
   local ver=$1 deps=$2 dest=$3
-  shift 3   # 余下为 --add-host 参数（可能为空）
-  local cname="phpbox-apkfetch-${ver//./}"
-  docker rm -f "$cname" 2>/dev/null || true   # 上次残留的同名容器会让 run 直接失败，先清
-  if ! timeout 2400 docker run --rm --name "$cname" "$@" -e APK_MIRRORS="$APK_MIRRORS" -e HOST_UID="$CURRENT_UID" -v "$dest":/pkgs \
-      "php:${ver}-fpm-alpine" sh -c "$_PHP_APK_FETCH_SCRIPT" phpbox-apkfetch recursive $deps; then
-    docker rm -f "$cname" 2>/dev/null || true
-    return 1
-  fi
+  _apk_ranked_fetch_run "php:${ver}-fpm-alpine" "phpbox-apkfetch-${ver//./}" 2400 recursive "$dest" $deps
 }
 
-# 基础包同步容器：把基础镜像的全量包按当前镜像源版本补进暂存（钉死库版本与前进的
-# 镜像源之间会 breaks，作用见调用方注释）。尽力而为：失败返回 1，由调用方仅告警
+# 基础包同步：把基础镜像的全量包按当前镜像源版本补进暂存（钉死库版本与前进的镜像源
+# 之间会 breaks，作用见调用方注释）。尽力而为：失败返回 1，由调用方仅告警
 _php_apk_basesync_run() {
   local ver=$1 dest=$2
-  shift 2
-  local sync_cname="phpbox-basesync-${ver//./}"
-  docker rm -f "$sync_cname" 2>/dev/null || true
-  if ! timeout 1800 docker run --rm --name "$sync_cname" "$@" -e APK_MIRRORS="$APK_MIRRORS" -v "$dest":/pkgs \
-      "php:${ver}-fpm-alpine" sh -c "$_PHP_APK_FETCH_SCRIPT" phpbox-basesync installed; then
-    docker rm -f "$sync_cname" 2>/dev/null || true
-    return 1
-  fi
+  _apk_ranked_fetch_run "php:${ver}-fpm-alpine" "phpbox-basesync-${ver//./}" 1800 installed "$dest"
 }
 
 # 宿主机侧暂存 apk 依赖闭包到构建上下文：优先命中按版本隔离的备份库
@@ -230,17 +130,14 @@ _php_stage_apk_closure() {
   # 暂存目录可能残留 chown 修复之前由容器写入的 root 属主文件，宿主用户删不动，走容器兜底清空
   _rm_rf_with_docker_fallback "$dest"
   mkdir -p "$dest"
-  local mirror="${APK_MIRRORS%% *}"   # 主源（首个）：用于 DNS 预解析
-  local addhost=()
-  mapfile -t addhost < <(_php_mirror_host_args "$mirror")
   log "apk 闭包备份库: $backup_dir → 构建目录: $dest"
-  log "apk 镜像源（按序故障转移）: $APK_MIRRORS"
+  log "apk 镜像源（先测速排序，超时 $APK_TIMEOUT 秒自动切换）: $APK_MIRRORS"
   if [ -n "$(ls -A "$backup_dir" 2>/dev/null)" ]; then
     log "apk 闭包命中: $backup_dir → $dest/（$(ls "$backup_dir" | wc -l) 个包）"
     cp "$backup_dir"/*.apk "$dest/"
   else
-    log "apk 闭包预取: 宿主容器内 apk fetch → $dest/（$ver，$(wc -w <<<"$deps") 个包；先测速排序，30 秒无响应自动切换）"
-    if ! _php_apk_prefetch_run "$ver" "$deps" "$dest" "${addhost[@]}"; then
+    log "apk 闭包预取: 宿主容器内 apk fetch → $dest/（$ver，$(wc -w <<<"$deps") 个包）"
+    if ! _php_apk_prefetch_run "$ver" "$deps" "$dest"; then
       log "警告：apk 闭包预取失败，本次构建降级为在线安装（备份库保持为空，下次构建自动重试）"
       rm -rf "$dest"
       return 1
@@ -250,7 +147,7 @@ _php_stage_apk_closure() {
   # 镜像源前进后其精确 pin 会与闭包里的新库 breaks——把基础镜像的全量包
   # 按当前镜像源版本补进暂存，离线安装时整个基础系统一起升级，版本重新对齐。
   # 离线场景此步会失败：容忍（未漂移时旧闭包仍可用；已漂移则需联网重试一次）
-  if ! _php_apk_basesync_run "$ver" "$dest" "${addhost[@]}"; then
+  if ! _php_apk_basesync_run "$ver" "$dest"; then
     log "警告：基础包同步失败（离线场景可忽略）；若构建报 breaks 版本冲突，请联网重试一次"
   fi
   # 暂存集 = 依赖闭包 + 基础镜像全量包（当前镜像源版本）= 可离线安装的一致状态。晋升备份库
@@ -366,16 +263,6 @@ _php_split_ext_list() {
     esac
   done
   _SPLIT_REMOTE="${_SPLIT_REMOTE# }"
-}
-
-# 把镜像源域名按预解析 IP 输出为 --add-host 参数（两行：标志与值；无镜像源或解析失败输出空）。
-# 容器内 DNS 对国内域名间歇性失败（DNS: transient error）且 apk 连接挂死无重试，跳过 DNS 可根治；
-# /etc/hosts 在 buildkit 中只读，必须用 --add-host 而非 RUN echo
-_php_mirror_host_args() {
-  local apk_mirror=$1
-  local host="${apk_mirror#*://}"; host="${host%%/*}"
-  local ip=$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}' || true)
-  if [ -n "$ip" ]; then echo "--add-host"; echo "$host:$ip"; fi
 }
 
 # 构建失败时彻底删除两个暂存目录（pecl 包与 apk 闭包）：未验证的内容没有备份库正本、

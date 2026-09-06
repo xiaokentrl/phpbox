@@ -366,15 +366,18 @@ else
 fi
 if [ "$COPY_N" -eq 1 ]; then ok "在线：COPY pecl 恰好出现一次"; else bad "在线：COPY pecl 出现 $COPY_N 次（应为 1）"; fi
 
-echo "== 8b. apk 下载器：源测速 + 30 秒无响应切换 =="
+echo "== 8b. apk 下载器：源测速 + 无响应切换（公共层） =="
 # 回归背景：apk 对中断的连接无读超时会永久挂死（实测 21 包后停摆），
-# 且用户要求用前测速、按最快优先下载、30 秒无响应自动切换下一个源
-assert_contains "apk 下载器: 用前逐源测速（索引下载计时）" "$_PHP_APK_FETCH_SCRIPT" "APKINDEX.tar.gz"
-assert_contains "apk 下载器: 按测速结果排序（最快优先）" "$_PHP_APK_FETCH_SCRIPT" "sort -n"
-assert_contains "apk 下载器: 索引获取 30s 超时" "$_PHP_APK_FETCH_SCRIPT" "timeout 30 apk update"
-assert_contains "apk 下载器: 下载进度双指标看门狗（目录大小+网卡流量）" "$_PHP_APK_FETCH_SCRIPT" "eth0"
-assert_contains "apk 下载器: 30s 无进展杀掉并切换下一个源" "$_PHP_APK_FETCH_SCRIPT" "30 秒无响应"
-assert_contains "apk 下载器: 预取与基础包同步共用同一脚本" "$(declare -f _php_apk_prefetch_run) $(declare -f _php_apk_basesync_run)" "_PHP_APK_FETCH_SCRIPT"
+# 且用户要求用前测速、按最快优先下载、超时无响应自动切换下一个源。
+# 下载器属公共能力（common.sh 的 _APK_FETCH_SCRIPT + _apk_ranked_fetch_run），
+# PHP 预取与基础包同步只做薄封装
+assert_contains "apk 下载器: 用前逐源测速（索引下载计时）" "$_APK_FETCH_SCRIPT" "APKINDEX.tar.gz"
+assert_contains "apk 下载器: 按测速结果排序（最快优先）" "$_APK_FETCH_SCRIPT" "sort -n"
+assert_contains "apk 下载器: 索引获取超时可配置" "$_APK_FETCH_SCRIPT" 'timeout $APK_TIMEOUT apk update'
+assert_contains "apk 下载器: 下载进度双指标看门狗（目录大小+网卡流量）" "$_APK_FETCH_SCRIPT" "eth0"
+assert_contains "apk 下载器: 超时无进展杀掉并切换下一个源" "$_APK_FETCH_SCRIPT" "秒无响应"
+assert_contains "apk 下载器: 公共函数驱动测速脚本" "$(declare -f _apk_ranked_fetch_run)" "_APK_FETCH_SCRIPT"
+assert_contains "apk 下载器: PHP 预取/基础包同步委托公共函数" "$(declare -f _php_apk_prefetch_run _php_apk_basesync_run)" "_apk_ranked_fetch_run"
 
 echo "== 9. load_env 边界：末行无换行 + 引号剥离 =="
 # 回归背景一：while read 对"无换行符的末行"返回非零，循环体整行跳过——末行的
@@ -428,6 +431,20 @@ if [ "$LEGACY" = "https://mirrors.aliyun.com/alpine https://dl-cdn.alpinelinux.o
 else
   bad "镜像源: 旧变量 APK_MIRROR 合并错误（得到: $LEGACY）"
 fi
+
+# APK_TIMEOUT：默认 30，env 可覆盖，非正整数在 load_env 即被拒
+if [ "$(bash -c "set -uo pipefail; source '$ROOT/lib/common.sh'; load_env 2>/dev/null; echo \$APK_TIMEOUT")" = "30" ]; then
+  ok "APK_TIMEOUT: 未配置时默认 30 秒"
+else
+  bad "APK_TIMEOUT: 默认值不是 30"
+fi
+if [ "$(APK_TIMEOUT=45 bash -c "set -uo pipefail; source '$ROOT/lib/common.sh'; load_env 2>/dev/null; echo \$APK_TIMEOUT")" = "45" ]; then
+  ok "APK_TIMEOUT: env 配置可覆盖（45 秒透传）"
+else
+  bad "APK_TIMEOUT: env 覆盖未生效"
+fi
+assert_cmd_error "APK_TIMEOUT: 非正整数被拒" "无效的 APK_TIMEOUT" \
+  env APK_TIMEOUT=abc bash -c "source '$ROOT/lib/common.sh'; load_env"
 
 echo
 echo "结果: $PASS 通过, $FAIL 失败"

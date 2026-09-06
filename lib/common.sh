@@ -71,19 +71,140 @@ _load_apk_mirrors() {
   APK_MIRRORS=${normalized# }
 }
 
-load_env() {
-  if [ -f "$ENV_FILE" ]; then
-    # IFS='=' 使 read 按等号拆分：key 取第一段，剩余全部并入 value（密码含 = 也不会截断）。
-    # read 读到"无换行符的末行"时返回非零——循环体会整行跳过，最后一行配置被静默丢弃
-    # （实测：末行的 APK_MIRRORS 丢失后回退默认镜像源），故以 || [ -n "$key" ] 收编末行
-    while IFS='=' read -r key value || [ -n "$key" ]; do
-      [[ "$key" =~ ^[[:space:]]*# ]] && continue   # 注释行（允许行首空白）：跳过
-      [[ -z "$key" ]] && continue                  # 空行：跳过
-      value="${value%$'\r'}"                       # 去掉行尾 \r，兼容 Windows 换行编辑过的 .env
-      value=$(_env_strip_quotes "$value")
-      export "$key"="$value"                       # 键名以字符串形式给出，逐行导出为环境变量
-    done < "$ENV_FILE"
+# 把镜像源域名按预解析 IP 输出为 --add-host 参数（两行：标志与值；解析失败输出空）。
+# 容器内 DNS 对国内域名间歇性失败（DNS: transient error）且 apk 连接挂死无重试，跳过 DNS 可根治；
+# /etc/hosts 在 buildkit 中只读，必须用 --add-host 而非 RUN echo
+_apk_mirror_host_args() {
+  local apk_mirror=$1
+  local host="${apk_mirror#*://}"; host="${host%%/*}"
+  local ip=$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}' || true)
+  if [ -n "$ip" ]; then echo "--add-host"; echo "$host:$ip"; fi
+}
+
+# 容器内 apk 下载器脚本（与 _apk_ranked_fetch_run、_load_apk_mirrors 同属 apk 源管理公共层）：
+# 1) 用前测速：逐源下载 main 索引计时（APK_TIMEOUT 秒上限，超时/失败剔除），按最快优先排序；
+# 2) 按测速顺序逐源整批下载：索引获取 APK_TIMEOUT 秒超时；下载期间以 /pkgs 增量 + 容器网卡
+#    流量为进度双指标，APK_TIMEOUT 秒无增长 = 无响应，杀掉当前下载自动切换下一个源。
+# 闭包必须出自同一源：切换源即清空 /pkgs 重来，避免两个源的版本混装。
+# 单引号包裹：脚本的 $ 一律为容器运行时展开。调用:
+#   sh -c "$_APK_FETCH_SCRIPT" <标签> recursive <包列表...>   # 递归闭包（预取）
+#   sh -c "$_APK_FETCH_SCRIPT" <标签> installed               # 全量已装包（基础包同步）
+_APK_FETCH_SCRIPT='
+cp /etc/apk/repositories /tmp/repos.orig
+MODE=$1; shift
+APK_TIMEOUT="${APK_TIMEOUT:-30}"
+VER="v$(cut -d. -f1,2 /etc/alpine-release 2>/dev/null)"
+case "$VER" in
+  v) VER=$(sed -n "s|^https://dl-cdn.alpinelinux.org/alpine/||p" /tmp/repos.orig | head -n1 | cut -d/ -f1) ;;
+esac
+ARCH=$(uname -m)
+RANKED=""
+echo "== 源测速（APKINDEX 下载耗时，${APK_TIMEOUT}s 上限）=="
+for m in $APK_MIRRORS; do
+  start=$(cut -d" " -f1 /proc/uptime)
+  if timeout $APK_TIMEOUT wget -T $APK_TIMEOUT -q -O /dev/null "$m/$VER/main/$ARCH/APKINDEX.tar.gz" 2>/dev/null; then
+    end=$(cut -d" " -f1 /proc/uptime)
+    t=$(awk -v a="$end" -v b="$start" "BEGIN{printf \"%.2f\", a-b}")
+    echo "  可用 $m  ${t}s"
+    RANKED="$RANKED$t $m
+"
+  else
+    echo "  不可用 $m（超时或失败，跳过）"
   fi
+done
+if [ -n "$RANKED" ]; then
+  ORDER=$(printf "%s" "$RANKED" | sort -n | cut -d" " -f2-)
+else
+  echo "全部源测速失败，退回配置顺序尝试"
+  ORDER="$APK_MIRRORS"
+fi
+n=0
+total=$(printf "%s" "$ORDER" | grep -c .)
+for m in $ORDER; do
+  n=$((n+1))
+  echo "== 尝试源 $n/$total: $m =="
+  { echo "$m/$VER/main"; echo "$m/$VER/community"; } > /etc/apk/repositories
+  if ! timeout $APK_TIMEOUT apk update >/dev/null 2>&1; then
+    echo "  索引获取失败，换下一个源"
+    continue
+  fi
+  rm -f /pkgs/*.apk 2>/dev/null
+  case "$MODE" in
+    recursive) apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
+    installed) apk fetch -o /pkgs $(apk info -q) & ;;
+  esac
+  apid=$!
+  last="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
+  stall=0
+  dead=""
+  while kill -0 $apid 2>/dev/null; do
+    sleep 5
+    cur="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
+    if [ "$cur" = "$last" ]; then
+      stall=$((stall+5))
+      [ $stall -ge $APK_TIMEOUT ] && { dead=1; break; }
+    else
+      stall=0; last="$cur"
+    fi
+  done
+  if [ -n "$dead" ]; then
+    kill $apid 2>/dev/null
+    wait $apid 2>/dev/null
+    echo "  ${APK_TIMEOUT} 秒无响应，停止并切换下一个源"
+    continue
+  fi
+  if wait $apid; then
+    echo "== 源 $m 下载完成 =="
+    OK=1
+    break
+  fi
+  echo "  下载失败，换下一个源"
+done
+if [ "$OK" = 1 ]; then
+  chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
+  exit 0
+fi
+echo "全部源均失败"
+exit 1
+'
+
+# 在 alpine 系容器内测速下载 apk 包（公共入口，预取/基础包同步等调用方只做薄封装）。
+# 参数: $1=基础镜像(如 php:8.4-fpm-alpine)  $2=容器名（固定名：宿主侧 timeout 杀掉客户端
+#       时容器会残留并挂住构建目录，按名强制清理，绝不留孤儿）
+#       $3=宿主侧总超时秒  $4=模式(recursive|installed)  $5=包落地目录(挂到 /pkgs)
+#       $6+=包列表（仅 recursive 模式）
+# 返回: 任一源下载成功 → 0；全部失败 → 1（降级策略由调用方决定）
+_apk_ranked_fetch_run() {
+  local image=$1 cname=$2 host_timeout=$3 mode=$4 dest=$5
+  shift 5
+  local addhost=()
+  mapfile -t addhost < <(_apk_mirror_host_args "${APK_MIRRORS%% *}")   # 主源 DNS 预解析
+  docker rm -f "$cname" 2>/dev/null || true   # 上次残留的同名容器会让 run 直接失败，先清
+  if ! timeout "$host_timeout" docker run --rm --name "$cname" "${addhost[@]}" \
+      -e APK_MIRRORS="$APK_MIRRORS" -e APK_TIMEOUT="$APK_TIMEOUT" -e HOST_UID="${CURRENT_UID:-}" -v "$dest":/pkgs \
+      "$image" sh -c "$_APK_FETCH_SCRIPT" phpbox-apk "$mode" "$@"; then
+    docker rm -f "$cname" 2>/dev/null || true
+    return 1
+  fi
+}
+
+# 逐行读取 .env 并导出为环境变量。IFS='=' 使 read 按等号拆分：key 取第一段，剩余全部
+# 并入 value（密码含 = 也不会截断）。read 读到"无换行符的末行"时返回非零——循环体会
+# 整行跳过，最后一行配置被静默丢弃（实测：末行的 APK_MIRRORS 丢失后回退默认镜像源），
+# 故以 || [ -n "$key" ] 收编末行
+_env_read_file() {
+  [ -f "$ENV_FILE" ] || return 0
+  while IFS='=' read -r key value || [ -n "$key" ]; do
+    [[ "$key" =~ ^[[:space:]]*# ]] && continue   # 注释行（允许行首空白）：跳过
+    [[ -z "$key" ]] && continue                  # 空行：跳过
+    value="${value%$'\r'}"                       # 去掉行尾 \r，兼容 Windows 换行编辑过的 .env
+    value=$(_env_strip_quotes "$value")          # 剥掉成对包裹的单/双引号
+    export "$key"="$value"                       # 键名以字符串形式给出，逐行导出为环境变量
+  done < "$ENV_FILE"
+}
+
+load_env() {
+  _env_read_file
 
   PROJECT_NAME="${PROJECT_NAME:-phpbox}"
   NETWORK_NAME="${NETWORK_NAME:-phpboxnet}"
@@ -116,9 +237,14 @@ load_env() {
   PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug}"
   # PHP 镜像构建的网络适配（镜像源列表解析见 _load_apk_mirrors）：
   BUILD_PROXY="${BUILD_PROXY:-auto}"
+  # 镜像源网络超时秒数（正整数）：源测速、索引获取、下载"无响应"判定三处共用
+  APK_TIMEOUT="${APK_TIMEOUT:-30}"
+  if ! [[ "$APK_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+    error "无效的 APK_TIMEOUT: $APK_TIMEOUT（应为正整数秒，示例: 30）"
+  fi
   _load_apk_mirrors
 
-  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR APK_MIRRORS BUILD_PROXY OFFLINE_DIR
+  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR APK_MIRRORS APK_TIMEOUT BUILD_PROXY OFFLINE_DIR
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
   mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$STATE_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
 
