@@ -54,17 +54,19 @@ _env_strip_quotes() {
 }
 
 # 解析并归一化 Alpine 镜像源列表（结果写入全局 APK_MIRRORS，空格分隔）。
-# APK_MIRRORS 已配置 → 每个源补全 /alpine 后缀（ICM 镜像的路径前缀不同）；
-# 未配置 → 默认 阿里云主源 + 官方 CDN 兜底；兼容旧变量 APK_MIRROR（作为首源并入）
+# 合并语义：内置默认源（阿里云主源 + 官方 CDN）始终在前，.env 的 APK_MIRRORS 是
+# "最终兜底"——默认源走不通（不可达/缺包）时按序接上，不替换默认链。
+# 每个源归一化到以 /alpine 结尾（ICM 等镜像的路径前缀不同），重复源去重保留首个位置；
+# 兼容旧变量 APK_MIRROR（并入兜底段）
 _load_apk_mirrors() {
   local m normalized=""
-  APK_MIRRORS="${APK_MIRRORS:-}"
-  if [ -z "$APK_MIRRORS" ]; then
-    APK_MIRRORS="https://mirrors.aliyun.com/alpine https://dl-cdn.alpinelinux.org/alpine"
-    [ -n "${APK_MIRROR:-}" ] && APK_MIRRORS="$APK_MIRROR $APK_MIRRORS"
-  fi
-  for m in $APK_MIRRORS; do
-    case "$m" in */alpine) normalized="$normalized $m" ;; *) normalized="$normalized $m/alpine" ;; esac
+  local list="https://mirrors.aliyun.com/alpine https://dl-cdn.alpinelinux.org/alpine"
+  [ -n "${APK_MIRROR:-}" ] && list="$list $APK_MIRROR"
+  list="$list ${APK_MIRRORS:-}"
+  for m in $list; do
+    case "$m" in */alpine) : ;; *) m="$m/alpine" ;; esac
+    case " $normalized " in *" $m "*) continue ;; esac   # 去重：保留首个出现位置
+    normalized="$normalized $m"
   done
   APK_MIRRORS=${normalized# }
 }
