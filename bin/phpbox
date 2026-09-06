@@ -64,7 +64,7 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
   MYSQL_DATA_ROOT MySQL 数据主目录（默认$HOME/mysql-data）
   MYSQL_80_ROOT_PASSWORD  预设 MySQL 8.0 的 root 密码（安装前写入 .env 即生效，键名规则 MYSQL_<去点版本>_ROOT_PASSWORD，未预设则自动生成）
   PHP_DEFAULT_EXTENSIONS  PHP 默认安装的扩展集（php install 不带 --ext 时生效，逗号分隔）
-  APK_MIRRORS     Alpine 镜像源兜底列表（空格分隔，默认源走不通时按序接上；值截取到 /alpine 含）
+  APK_MIRRORS     Alpine 镜像源兜底列表（空格分隔；使用前自动测速按最快优先下载，30 秒无响应自动切换）
   BUILD_PROXY     PHP 构建代理（auto=自动探测本地代理，默认；none=禁用；或直接指定 host:port）
   其他变量请查看 .env 文件
 

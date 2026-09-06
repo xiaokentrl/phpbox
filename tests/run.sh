@@ -366,6 +366,16 @@ else
 fi
 if [ "$COPY_N" -eq 1 ]; then ok "在线：COPY pecl 恰好出现一次"; else bad "在线：COPY pecl 出现 $COPY_N 次（应为 1）"; fi
 
+echo "== 8b. apk 下载器：源测速 + 30 秒无响应切换 =="
+# 回归背景：apk 对中断的连接无读超时会永久挂死（实测 21 包后停摆），
+# 且用户要求用前测速、按最快优先下载、30 秒无响应自动切换下一个源
+assert_contains "apk 下载器: 用前逐源测速（索引下载计时）" "$_PHP_APK_FETCH_SCRIPT" "APKINDEX.tar.gz"
+assert_contains "apk 下载器: 按测速结果排序（最快优先）" "$_PHP_APK_FETCH_SCRIPT" "sort -n"
+assert_contains "apk 下载器: 索引获取 30s 超时" "$_PHP_APK_FETCH_SCRIPT" "timeout 30 apk update"
+assert_contains "apk 下载器: 下载进度双指标看门狗（目录大小+网卡流量）" "$_PHP_APK_FETCH_SCRIPT" "eth0"
+assert_contains "apk 下载器: 30s 无进展杀掉并切换下一个源" "$_PHP_APK_FETCH_SCRIPT" "30 秒无响应"
+assert_contains "apk 下载器: 预取与基础包同步共用同一脚本" "$(declare -f _php_apk_prefetch_run) $(declare -f _php_apk_basesync_run)" "_PHP_APK_FETCH_SCRIPT"
+
 echo "== 9. load_env 边界：末行无换行 + 引号剥离 =="
 # 回归背景一：while read 对"无换行符的末行"返回非零，循环体整行跳过——末行的
 # APK_MIRRORS 配置被静默丢弃，静默回退默认镜像源（用户配置形同虚设）

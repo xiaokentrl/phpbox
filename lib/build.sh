@@ -103,28 +103,102 @@ _php_promote_pecl_tarballs() {
   _PECL_STAGED=""
 }
 
+# 容器内 apk 下载器（prefetch 与 basesync 共用）：源测速排序 + 30 秒无响应自动切换。
+# 1) 用前测速：逐源下载 main 索引计时（30s 上限），不可用源剔除，其余按最快优先排序；
+# 2) 按测速顺序逐源整批下载：索引获取 30s 超时；下载期间以 /pkgs 大小 + 容器网卡流量
+#    为进度双指标，30s 无增长 = 无响应，杀掉当前下载自动切换下一个源。
+# 单引号包裹：脚本的 $ 一律为容器运行时展开。调用:
+#   sh -c "$_PHP_APK_FETCH_SCRIPT" <标签> recursive <包列表...>   # 递归闭包（预取）
+#   sh -c "$_PHP_APK_FETCH_SCRIPT" <标签> installed               # 全量已装包（基础包同步）
+# 闭包必须出自同一源：切换源即清空 /pkgs 重来，避免两个源的版本混装
+_PHP_APK_FETCH_SCRIPT='
+cp /etc/apk/repositories /tmp/repos.orig
+MODE=$1; shift
+VER="v$(cut -d. -f1,2 /etc/alpine-release 2>/dev/null)"
+case "$VER" in
+  v) VER=$(sed -n "s|^https://dl-cdn.alpinelinux.org/alpine/||p" /tmp/repos.orig | head -n1 | cut -d/ -f1) ;;
+esac
+ARCH=$(uname -m)
+RANKED=""
+echo "== 源测速（APKINDEX 下载耗时，30s 上限）=="
+for m in $APK_MIRRORS; do
+  start=$(cut -d" " -f1 /proc/uptime)
+  if timeout 30 wget -T 30 -q -O /dev/null "$m/$VER/main/$ARCH/APKINDEX.tar.gz" 2>/dev/null; then
+    end=$(cut -d" " -f1 /proc/uptime)
+    t=$(awk -v a="$end" -v b="$start" "BEGIN{printf \"%.2f\", a-b}")
+    echo "  可用 $m  ${t}s"
+    RANKED="$RANKED$t $m
+"
+  else
+    echo "  不可用 $m（超时或失败，跳过）"
+  fi
+done
+if [ -n "$RANKED" ]; then
+  ORDER=$(printf "%s" "$RANKED" | sort -n | cut -d" " -f2-)
+else
+  echo "全部源测速失败，退回配置顺序尝试"
+  ORDER="$APK_MIRRORS"
+fi
+n=0
+total=$(printf "%s" "$ORDER" | grep -c .)
+for m in $ORDER; do
+  n=$((n+1))
+  echo "== 尝试源 $n/$total: $m =="
+  { echo "$m/$VER/main"; echo "$m/$VER/community"; } > /etc/apk/repositories
+  if ! timeout 30 apk update >/dev/null 2>&1; then
+    echo "  索引获取失败，换下一个源"
+    continue
+  fi
+  rm -f /pkgs/*.apk 2>/dev/null
+  case "$MODE" in
+    recursive) apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
+    installed) apk fetch -o /pkgs $(apk info -q) & ;;
+  esac
+  apid=$!
+  last="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
+  stall=0
+  dead=""
+  while kill -0 $apid 2>/dev/null; do
+    sleep 5
+    cur="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
+    if [ "$cur" = "$last" ]; then
+      stall=$((stall+5))
+      [ $stall -ge 30 ] && { dead=1; break; }
+    else
+      stall=0; last="$cur"
+    fi
+  done
+  if [ -n "$dead" ]; then
+    kill $apid 2>/dev/null
+    wait $apid 2>/dev/null
+    echo "  30 秒无响应，停止并切换下一个源"
+    continue
+  fi
+  if wait $apid; then
+    echo "== 源 $m 下载完成 =="
+    OK=1
+    break
+  fi
+  echo "  下载失败，换下一个源"
+done
+if [ "$OK" = 1 ]; then
+  chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
+  exit 0
+fi
+echo "全部源均失败"
+exit 1
+'
+
 # apk 闭包预取容器：向空 root 全新安装，把"必然完整"的依赖闭包拉到 $dest。
-# apk 对中断的连接无读超时、会永久挂死（实测拉到 21 个包后停摆），双重保险：
-# 容器内 timeout+重试先止血；宿主侧 timeout 兜底。容器取固定名——客户端被
-# timeout 杀掉时容器会残留并挂住构建目录，按名强制清理，绝不留孤儿
+# 测速排序与无响应切换逻辑见 _PHP_APK_FETCH_SCRIPT；宿主侧 timeout 兜底。容器取固定名
+# ——客户端被 timeout 杀掉时容器会残留并挂住构建目录，按名强制清理，绝不留孤儿
 _php_apk_prefetch_run() {
   local ver=$1 deps=$2 dest=$3
   shift 3   # 余下为 --add-host 参数（可能为空）
   local cname="phpbox-apkfetch-${ver//./}"
   docker rm -f "$cname" 2>/dev/null || true   # 上次残留的同名容器会让 run 直接失败，先清
   if ! timeout 2400 docker run --rm --name "$cname" "$@" -e APK_MIRRORS="$APK_MIRRORS" -e HOST_UID="$CURRENT_UID" -v "$dest":/pkgs \
-      "php:${ver}-fpm-alpine" sh -c '
-        # 多镜像源 repositories：apk 原生按序尝试，单源失败自动切下一个
-        cp /etc/apk/repositories /tmp/repos.orig
-        : > /etc/apk/repositories
-        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
-        # 必须先 apk update：新容器没有缓存的索引，fetch 会就地报 unable to select。
-        # apk_try = timeout 止血 + 重试 3 次（update 3×120s，fetch 3×600s）；输出不吞，逐包即进度
-        apk_try() { local n=1; until "$@"; do n=$((n+1)); [ $n -gt 3 ] && return 1; echo "  重试 $n/3: $*"; done; }
-        apk_try timeout 120 apk update || exit 1
-        apk_try timeout 600 apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS '"$deps"' || exit 1
-        chown -R "$HOST_UID:$HOST_UID" /pkgs 2>/dev/null || true
-      '; then
+      "php:${ver}-fpm-alpine" sh -c "$_PHP_APK_FETCH_SCRIPT" phpbox-apkfetch recursive $deps; then
     docker rm -f "$cname" 2>/dev/null || true
     return 1
   fi
@@ -138,14 +212,7 @@ _php_apk_basesync_run() {
   local sync_cname="phpbox-basesync-${ver//./}"
   docker rm -f "$sync_cname" 2>/dev/null || true
   if ! timeout 1800 docker run --rm --name "$sync_cname" "$@" -e APK_MIRRORS="$APK_MIRRORS" -v "$dest":/pkgs \
-      "php:${ver}-fpm-alpine" sh -c '
-        cp /etc/apk/repositories /tmp/repos.orig
-        : > /etc/apk/repositories
-        for m in $APK_MIRRORS; do sed "s|https://dl-cdn.alpinelinux.org/alpine|$m|g" /tmp/repos.orig >> /etc/apk/repositories; done
-        apk_try() { local n=1; until "$@"; do n=$((n+1)); [ $n -gt 2 ] && return 1; done; }
-        apk_try timeout 120 apk update >/dev/null
-        apk_try timeout 900 apk fetch -o /pkgs $(apk info -q) 2>/dev/null
-      ' >/dev/null 2>&1; then
+      "php:${ver}-fpm-alpine" sh -c "$_PHP_APK_FETCH_SCRIPT" phpbox-basesync installed; then
     docker rm -f "$sync_cname" 2>/dev/null || true
     return 1
   fi
@@ -172,7 +239,7 @@ _php_stage_apk_closure() {
     log "apk 闭包命中: $backup_dir → $dest/（$(ls "$backup_dir" | wc -l) 个包）"
     cp "$backup_dir"/*.apk "$dest/"
   else
-    log "apk 闭包预取: 宿主容器内 apk fetch --recursive → $dest/（$ver，$(wc -w <<<"$deps") 个包）"
+    log "apk 闭包预取: 宿主容器内 apk fetch → $dest/（$ver，$(wc -w <<<"$deps") 个包；先测速排序，30 秒无响应自动切换）"
     if ! _php_apk_prefetch_run "$ver" "$deps" "$dest" "${addhost[@]}"; then
       log "警告：apk 闭包预取失败，本次构建降级为在线安装（备份库保持为空，下次构建自动重试）"
       rm -rf "$dest"
