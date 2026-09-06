@@ -12,11 +12,6 @@ BACKUP_DIR="$BASE_DIR/backups"
 STATE_DIR="$BASE_DIR/state"
 ENV_FILE="$BASE_DIR/.env"
 
-# 站点配置在容器内的挂载点：刻意与 Nginx 版本解耦——无论用 nginx:alpine 还是其它 tag，
-# 站点一律放 config/nginx/sites/，每个站点一个 <域名>.conf，由主配置统一 include
-SITES_MOUNT_PATH="/etc/nginx/sites"
-SITES_INCLUDE_LINE="include ${SITES_MOUNT_PATH}/*.conf;"
-
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 CYAN='\033[1;36m'
@@ -380,86 +375,8 @@ init_config_files() {
   success "$svc $ver 配置就绪"
 }
 
-# 幂等地把站点目录 include 写进任意版本的 nginx.conf，保证"多站点共用一个 sites 目录"。
-# 1) 先剔除历史注入行（任意缩进、任意 sites 路径写法），否则重复 include 会让每个站点的
-#    server 块被加载两次，nginx -t 直接报 duplicate server name；
-# 2) 再把唯一权威写法插到 http{} 内：紧跟 conf.d 的 include 之后（保留镜像自带 default
-#    server 的优先语义），没有 conf.d 时退回紧跟 http{ ；
-# 3) 幂等：对同一份配置反复执行结果不变，切换/重装 Nginx 版本不会累积脏行。
-_nginx_inject_sites_include() {
-  local conf=$1
-  [ -f "$conf" ] || error "Nginx 主配置不存在: $conf"
-  local stripped="$conf.pbox.tmp"
-
-  # 清理范围限定在"路径中含 sites 目录"的 include（sites/、sites-enabled/、legacy-sites/…），
-  # 不碰 mime.types、conf.d 等无关行；历史写法若不清干净，站点 server 块会被加载两次
-  # grep 无匹配时返回 1，set -e 下必须 || true（结果为空文件也是合法的）
-  grep -vE '^[[:space:]]*include[[:space:]]+[^;]*sites[^;]*\*\.conf;[[:space:]]*$' "$conf" > "$stripped" || true
-
-  # awk 惯用法：命中锚点行后先原样打印、再追加 include，next 结束本行处理；
-  # 末尾的 "1" 是恒真条件，对其余行执行默认动作（打印）——即逐行原样输出。
-  # done 标志保证只注入一次（配置里可能出现多行 include）
-  if grep -qE '^[[:space:]]*include[[:space:]]+/etc/nginx/conf\.d/[^;]*;' "$stripped"; then
-    awk -v inc="    ${SITES_INCLUDE_LINE}" '
-      /^[[:space:]]*include[[:space:]]+\/etc\/nginx\/conf\.d\/[^;]*;/ {
-        print; if (!done) { print inc; done=1 } next
-      }
-      1
-    ' "$stripped" > "$conf"
-  else
-    awk -v inc="    ${SITES_INCLUDE_LINE}" '
-      /http[[:space:]]*{/ { print; if (!done) { print inc; done=1 } next }
-      1
-    ' "$stripped" > "$conf"
-  fi
-  rm -f "$stripped"
-
-  grep -qF "${SITES_INCLUDE_LINE}" "$conf" || error "未能向 $(basename "$conf") 注入站点目录 include"
-}
-
-# 从指定版本的 nginx 镜像拷出默认配置，并注入站点目录 include
-_init_nginx_config() {
-  local dir=$1 ver=$2
-  docker run --rm -v "$dir":/out "nginx:${ver}" \
-    sh -c "cp -r /etc/nginx/conf.d /out/ && cp /etc/nginx/nginx.conf /out/" || {
-    rm -rf "$dir"; error "Nginx 配置提取失败"
-  }
-  _nginx_inject_sites_include "$dir/nginx.conf"
-}
-
-# 从对应版本的 php 镜像拷出 php.ini-production 作为起点
-_init_php_config() {
-  local dir=$1 ver=$2
-  docker run --rm -v "$dir":/out "php:${ver}-fpm-alpine" \
-    sh -c "cp /usr/local/etc/php/php.ini-production /out/php.ini" || {
-    rm -rf "$dir"; error "PHP 配置提取失败"
-  }
-}
-
-# MySQL 镜像不带可拷贝的配置模板，按版本生成：
-# 8.4 起旧的 default-authentication-plugin 写法已移除，改用 mysql_native_password=ON 启用旧认证插件
-_init_mysql_config() {
-  local dir=$1 ver=$2
-  local mysql_major=$(echo "$ver" | cut -d. -f1)
-  local mysql_minor=$(echo "$ver" | cut -d. -f2)
-  if [[ "$mysql_major" -ge 8 && "$mysql_minor" -ge 4 ]] || [[ "$mysql_major" -gt 8 ]]; then
-    cat > "$dir/my.cnf" <<'MYEOF'
-[mysqld]
-character-set-server=utf8mb4
-collation-server=utf8mb4_unicode_ci
-mysql_native_password=ON
-MYEOF
-  else
-    cat > "$dir/my.cnf" <<'MYEOF'
-[mysqld]
-character-set-server=utf8mb4
-collation-server=utf8mb4_unicode_ci
-default-authentication-plugin=mysql_native_password
-MYEOF
-  fi
-}
-
-# 通用服务安装（仅用于 MySQL/Redis）
+# 各服务的配置模板生成器（_init_nginx/php/mysql_config）已归位各服务模块，
+# init_config_files 统一分发调用。nginx 的站点挂载常量 SITES_* 亦随迁 nginx.sh
 _generic_service_install() {
   local svc=$1 ver=$2 default_port=$3
   shift 3

@@ -244,6 +244,8 @@ _php_uninstall() {
   success "PHP ${ver} 已卸载"
 }
 
+
+
 # 仅做分发，实现见各 _php_* 函数
 cmd_php() {
   case "${1:-help}" in

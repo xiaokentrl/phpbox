@@ -169,6 +169,31 @@ _mysql_uninstall() {
   success "MySQL ${ver} 已卸载"
 }
 
+# MySQL 镜像不带可拷贝的配置模板，按版本生成：
+# 8.4 起旧的 default-authentication-plugin 写法已移除，改用 mysql_native_password=ON 启用旧认证插件
+_init_mysql_config() {
+  local dir=$1 ver=$2
+  local mysql_major=$(echo "$ver" | cut -d. -f1)
+  local mysql_minor=$(echo "$ver" | cut -d. -f2)
+  if [[ "$mysql_major" -ge 8 && "$mysql_minor" -ge 4 ]] || [[ "$mysql_major" -gt 8 ]]; then
+    cat > "$dir/my.cnf" <<'MYEOF'
+[mysqld]
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+mysql_native_password=ON
+MYEOF
+  else
+    cat > "$dir/my.cnf" <<'MYEOF'
+[mysqld]
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+default-authentication-plugin=mysql_native_password
+MYEOF
+  fi
+}
+
+# 通用服务安装（仅用于 MySQL/Redis）
+
 # 仅做分发，实现见各 _mysql_* 函数
 cmd_mysql() {
   case "${1:-help}" in
