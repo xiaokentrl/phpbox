@@ -4,12 +4,6 @@
 
 ## 特性
 
-- **多版本共存**：PHP 8.0 / 8.4、MySQL 8.0 / 8.4、Redis 同时运行，按标签识别、按容器隔离
-- **扩展按需增删**：`phpbox php extension add 8.4 redis` 自动重建镜像，已有扩展清单不丢
-- **站点一个文件一个**：站点配置统一落在 `config/nginx/sites/<域名>.conf`，与 Nginx 版本解耦——换 Nginx 镜像 tag 不会动到任何站点
-- **端口自动避让**：端口被占用时自动挑空闲端口并写回 `.env`，密码只生成一次并持久化
-- **备份 / 恢复**：连 Docker 卷数据一起打包，恢复前校验归档路径，拒绝越界成员
-- **变更可回滚**：端口变更、站点变更均先验证后生效，失败自动回滚
 
 ## 前置条件
 
@@ -118,22 +112,25 @@ phpbox list                             # 查看已安装服务
 ## 目录结构
 
 ```
-~/phpbox/
-├── bin/phpbox              # CLI 入口：命令分发与帮助
-├── lib/                    # 功能库（按服务拆分）
+$HOME/phpbox/
+├── bin/phpbox                    # 主入口脚本（用户调用）
+├── lib/
+│   ├── common.sh                 # 公共函数：日志、环境加载、端口检查、Docker 预检、回滚框架等
+│   ├── build.sh                  # PHP 镜像构建：apk/pecl 离线缓存、Dockerfile 渲染、构建验证
+│   ├── php.sh                    # PHP 命令实现：install/extension/list/uninstall
+│   ├── mysql.sh                  # MySQL 管理（未提供完整，但接口由主入口调用）
+│   ├── redis.sh                  # Redis 管理
+│   ├── nginx.sh                  # Nginx 管理
+│   ├── site.sh                   # 站点管理
+│   └── backup.sh                 # 备份与恢复
 ├── compose/
-│   ├── docker-compose.yml  # 只定义共享网络（生成物）
-│   └── services/*.yml      # 每个服务一个分片（生成物）
-├── config/                 # 首次运行时从镜像提取 / 按版本生成，之后可自由修改
-│   ├── php/<版本>/         # php.ini（镜像提取）+ Dockerfile（按扩展清单生成）
-│   ├── mysql/<版本>/my.cnf
-│   └── nginx/
-│       ├── <版本>/         # 从镜像提取的主配置与 conf.d
-│       └── sites/          # 站点配置：每个站点一个 <域名>.conf
-├── state/                  # 已安装 PHP 的扩展清单（运行期写入）
-├── logs/                   # 容器日志挂载点
-├── backups/                # 备份归档
-└── tests/                  # lint 与回归测试
+│   ├── docker-compose.yml        # 主 compose（仅定义共享网络）
+│   └── services/                 # 每个服务版本一个 yml 分片（如 php-8.4.yml）
+├── config/                       # 各服务版本的配置模板（php.ini/my.cnf/nginx.conf）
+├── state/                        # 持久化状态文件（如 PHP 扩展列表）
+├── offline/                      # 离线构建缓存（php/<版本>/apk/、pecl/）
+├── backups/                      # 备份归档
+└── .env                          # 环境变量配置文件（用户可修改）
 ```
 
 ### 仓库里有什么
