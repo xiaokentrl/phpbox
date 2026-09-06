@@ -3,7 +3,7 @@
 
 _php_get_extensions_file() {
   local ver=$1
-  echo "$STATE_DIR/php-${ver//./}-extensions.env"
+  echo "$PHP_CONFIG_DIR/$ver/extensions.env"
 }
 
 _php_read_extensions() {

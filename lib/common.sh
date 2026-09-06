@@ -7,9 +7,10 @@ COMPOSE_DIR="$BASE_DIR/compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 EXT_DIR="$COMPOSE_DIR/services"
 CONFIG_DIR="$BASE_DIR/config"
+PHP_CONFIG_DIR="$CONFIG_DIR/php"
 LOG_DIR="$BASE_DIR/logs"
 BACKUP_DIR="$BASE_DIR/backups"
-STATE_DIR="$BASE_DIR/state"
+LEGACY_STATE_DIR="$BASE_DIR/state"
 ENV_FILE="$BASE_DIR/.env"
 
 GREEN='\033[0;32m'
@@ -99,6 +100,7 @@ case "$VER" in
 esac
 ARCH=$(uname -m)
 RANKED=""
+echo "== 初始化 apk 下载器（模式: $MODE，架构: $ARCH，超时: ${APK_TIMEOUT}s）=="
 echo "== 源测速（APKINDEX 下载耗时，${APK_TIMEOUT}s 上限）=="
 for m in $APK_MIRRORS; do
   start=$(cut -d" " -f1 /proc/uptime)
@@ -128,7 +130,11 @@ for m in $ORDER; do
   # 交给 fetch 解析检验（community 缺索引只影响 community 包，main 包照常解析）
   u=1
   while [ $u -le 3 ]; do
-    timeout $APK_TIMEOUT apk update >/dev/null 2>&1 && break
+    echo "  获取 apk 索引（第 $u/3 次，最长 ${APK_TIMEOUT}s）..."
+    if timeout $APK_TIMEOUT apk update >/dev/null 2>&1; then
+      echo "  apk 索引获取完成"
+      break
+    fi
     u=$((u+1))
     [ $u -le 3 ] && { echo "  索引获取失败，重试 $u/3"; sleep 2; }
   done
@@ -137,16 +143,20 @@ for m in $ORDER; do
   # installed（基础包同步）是增量补充——曾因清空对两种模式都生效，把预取闭包删得只剩
   # 基础镜像自带包（41 个），离线构建 phpize 报 Cannot find autoconf
   case "$MODE" in
-    recursive) rm -f /pkgs/*.apk 2>/dev/null; apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
-    installed) apk fetch -o /pkgs $(apk info -q) & ;;
+    recursive) rm -f /pkgs/*.apk 2>/dev/null; echo "  开始递归下载构建依赖（目标包: $#，输出目录: /pkgs）"; apk fetch --recursive -o /pkgs shadow curl $PHPIZE_DEPS "$@" & ;;
+    installed) echo "  开始同步基础镜像已安装包（输出目录: /pkgs）"; apk fetch -o /pkgs $(apk info -q) & ;;
   esac
   apid=$!
   last="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
   stall=0
   dead=""
+  started=$(cut -d" " -f1 /proc/uptime)
   while kill -0 $apid 2>/dev/null; do
     sleep 5
     cur="$(du -sk /pkgs 2>/dev/null | cut -f1) $(grep "^ *eth0:" /proc/net/dev | awk "{print \$2}")"
+    now=$(cut -d" " -f1 /proc/uptime)
+    elapsed=$(awk -v a="$now" -v b="$started" "BEGIN{printf \"%.0f\", a-b}")
+    echo "  下载进行中：已耗时 ${elapsed}s，文件 ${cur%% *} KiB，网卡接收 ${cur##* } KiB"
     if [ "$cur" = "$last" ]; then
       stall=$((stall+5))
       [ $stall -ge $APK_TIMEOUT ] && { dead=1; break; }
@@ -169,7 +179,9 @@ for m in $ORDER; do
       ls /pkgs/$t-*.apk >/dev/null 2>&1 || { verify=0; break; }
     done
     if [ "$verify" = 1 ]; then
-      echo "== 源 $m 下载完成 =="
+      count=$(find /pkgs -maxdepth 1 -name "*.apk" -type f 2>/dev/null | wc -l)
+      size=$(du -sh /pkgs 2>/dev/null | cut -f1)
+      echo "== 源 $m 下载完成（$count 个包，$size）=="
       OK=1
       break
     fi
@@ -198,9 +210,10 @@ _apk_ranked_fetch_run() {
   local addhost=()
   mapfile -t addhost < <(_apk_mirror_host_args "${APK_MIRRORS%% *}")   # 主源 DNS 预解析
   docker rm -f "$cname" 2>/dev/null || true   # 上次残留的同名容器会让 run 直接失败，先清
+  log "apk 下载器启动：镜像 $image，容器 $cname，宿主超时 ${host_timeout}s，模式 $mode"
   if ! timeout "$host_timeout" docker run --rm --name "$cname" "${addhost[@]}" \
       -e APK_MIRRORS="$APK_MIRRORS" -e APK_TIMEOUT="$APK_TIMEOUT" -e HOST_UID="${CURRENT_UID:-}" -v "$dest":/pkgs \
-      "$image" sh -c "$_APK_FETCH_SCRIPT" phpbox-apk "$mode" "$@"; then
+      "$image" sh -c "$_APK_FETCH_SCRIPT" phpbox-apk "$mode" "$@" >&2; then
     docker rm -f "$cname" 2>/dev/null || true
     return 1
   fi
@@ -246,6 +259,13 @@ load_env() {
   # 离线备份库：pecl 源码包与 apk 依赖闭包的持久备份（按分类/PHP 版本分目录），
   # 命中即离线构建，换机随 phpbox backup 迁移
   OFFLINE_DIR="${OFFLINE_DIR:-$BASE_DIR/offline}"
+  if [ "$OFFLINE_DIR" = "~" ]; then
+    OFFLINE_DIR="$HOME"
+  elif [[ "$OFFLINE_DIR" == ~/* ]]; then
+    OFFLINE_DIR="$HOME/${OFFLINE_DIR#~/}"
+  elif [[ "$OFFLINE_DIR" != /* ]]; then
+    OFFLINE_DIR="$BASE_DIR/$OFFLINE_DIR"
+  fi
   # PHP 缺省安装的扩展集（php install 不带 --ext 时生效）。
   # curl/openssl/mbstring/pdo/sqlite3/xml/xmlwriter/xmlreader/simplexml/dom/fileinfo
   # 以及 sodium/pcntl/posix 等已编译进 php-fpm-alpine 镜像，无需也不能重复安装；
@@ -264,7 +284,33 @@ load_env() {
 
   export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR APK_MIRRORS APK_TIMEOUT BUILD_PROXY OFFLINE_DIR
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
-  mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$STATE_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
+    mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$PHP_CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
+
+    # 兼容旧版本：扩展清单曾位于顶层 state/，只在新文件不存在时迁移，绝不覆盖已有配置。
+    local legacy_file legacy_name compact_version version target_file
+    for legacy_file in "$LEGACY_STATE_DIR"/php-*-extensions.env; do
+      [ -f "$legacy_file" ] || continue
+      legacy_name=$(basename "$legacy_file")
+      compact_version=${legacy_name#php-}
+      compact_version=${compact_version%-extensions.env}
+      if ! [[ "$compact_version" =~ ^[0-9]{2}$ ]]; then
+        log "警告：无法自动迁移旧 PHP 扩展状态（版本格式不受支持，文件保留）: $legacy_file"
+        continue
+      fi
+      version="${compact_version:0:1}.${compact_version:1:1}"
+      target_file="$PHP_CONFIG_DIR/$version/extensions.env"
+      if [ -e "$target_file" ]; then
+        log "保留旧扩展状态（新文件已存在，未覆盖）: $legacy_file"
+        continue
+      fi
+      mkdir -p "${target_file%/*}"
+      if mv "$legacy_file" "$target_file"; then
+        log "已迁移 PHP 扩展状态: $legacy_file -> $target_file"
+      else
+        error "PHP 扩展状态迁移失败，旧文件保持不变: $legacy_file"
+      fi
+    done
+    rmdir "$LEGACY_STATE_DIR" 2>/dev/null || true
 
   # 主 compose 文件属于生成物（不入仓）：干净 clone 后首次执行任意命令时自愈生成。
   # 它只定义共享网络，具体服务由 compose/services/*.yml 分片提供
@@ -447,7 +493,7 @@ _rm_rf_with_docker_fallback() {
 
 # 安装类命令：_install_rollback_begin → 写配置/起容器 → 成功 _install_rollback_commit。
 # 中途任何一步 error() 退出都会触发 EXIT trap，由 _install_rollback_run 清掉"本次新增"的
-# yml/配置目录/数据目录/state 文件与 .env 键——只清理本次新增的（先快照存在性），不碰历史残留
+# yml/配置目录/数据目录/扩展状态文件与 .env 键——只清理本次新增的（先快照存在性），不碰历史残留
 _ROLLBACK_PENDING=false
 _ROLLBACK_SVC="" ; _ROLLBACK_VER=""
 _ROLLBACK_CONFIG_EXISTED=false ; _ROLLBACK_DATA_EXISTED=false ; _ROLLBACK_STATE_EXISTED=false
@@ -458,7 +504,7 @@ _install_rollback_begin() {
   _ROLLBACK_PENDING=true ; _ROLLBACK_SVC=$svc ; _ROLLBACK_VER=$ver
   if [ -d "$CONFIG_DIR/$svc/$ver" ]; then _ROLLBACK_CONFIG_EXISTED=true; fi
   if [ -d "$MYSQL_DATA_ROOT/$ver" ]; then _ROLLBACK_DATA_EXISTED=true; fi
-  if [ -f "$STATE_DIR/php-${ver//./}-extensions.env" ]; then _ROLLBACK_STATE_EXISTED=true; fi
+  if [ -f "$PHP_CONFIG_DIR/$ver/extensions.env" ]; then _ROLLBACK_STATE_EXISTED=true; fi
   key=$(port_key "$svc" "$ver")
   if [ -n "$(read_env_value "$key" "")" ]; then _ROLLBACK_PORT_EXISTED=true; fi
   key="${svc^^}_${ver//./}_ROOT_PASSWORD"
@@ -479,7 +525,7 @@ _install_rollback_run() {
     redis)
       docker volume rm -f "$(get_volume_name redis "$ver")" &>/dev/null || true ;;
     php)
-      if ! $_ROLLBACK_STATE_EXISTED; then rm -f "$STATE_DIR/php-${ver//./}-extensions.env"; fi
+      if ! $_ROLLBACK_STATE_EXISTED; then rm -f "$PHP_CONFIG_DIR/$ver/extensions.env"; fi
       _php_cleanup_images "$ver" ;;
   esac
   if ! $_ROLLBACK_PORT_EXISTED; then

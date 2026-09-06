@@ -126,8 +126,7 @@ $HOME/phpbox/
 ├── compose/
 │   ├── docker-compose.yml        # 主 compose（仅定义共享网络）
 │   └── services/                 # 每个服务版本一个 yml 分片（如 php-8.4.yml）
-├── config/                       # 各服务版本的配置模板（php.ini/my.cnf/nginx.conf）
-├── state/                        # 持久化状态文件（如 PHP 扩展列表）
+├── config/                       # 各服务版本配置与 PHP 扩展清单
 ├── offline/                      # 离线构建缓存（php/<版本>/apk/、pecl/）
 ├── backups/                      # 备份归档
 └── .env                          # 环境变量配置文件（用户可修改）
@@ -146,14 +145,14 @@ $HOME/phpbox/
 | `config/php/*/Dockerfile`、`config/php/*/php.ini` | `php install`、`php extension add/remove` |
 | `config/mysql/*/my.cnf`、`config/nginx/*/{nginx.conf,conf.d/}` | 首次安装对应服务时从镜像提取或按版本生成 |
 | `config/nginx/sites/*.conf` | `site add` |
-| `state/*.env`、`logs/*.log`、`backups/*.tar.gz` | 安装过程与运行期 |
+| `config/php/*/extensions.env`、`logs/*.log`、`backups/*.tar.gz` | 安装过程与运行期 |
 
 因此干净 clone 后**不需要**这些文件：执行 `install.sh`（或任意 `phpbox` 命令，`load_env` 会自动补建主 compose 文件与目录结构）即可重建。迁移或排错时改了生成物不会有预期效果——要改的是生成它们的逻辑，或改 `.env` 后重新安装。
 
 ## 备份与恢复
 
 ```bash
-phpbox backup                       # 打包 .env、state/、config/ 与数据卷
+phpbox backup                       # 打包 .env、config/ 与数据卷
 phpbox restore backups/backup-<时间戳>.tar.gz
 ```
 

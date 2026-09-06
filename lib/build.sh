@@ -103,7 +103,7 @@ _php_promote_pecl_tarballs() {
   local fname
   for fname in $_PECL_STAGED; do
     cp "$dest/$fname" "$backup_dir/$fname"
-    log "已验证入备份库: offline/php/$ver/pecl/$fname"
+    log "已验证入备份库: $backup_dir/$fname"
   done
   _PECL_STAGED=""
 }
@@ -138,7 +138,7 @@ _php_apk_closure_verify() {
 }
 
 # 宿主机侧暂存 apk 依赖闭包到构建上下文：优先命中按版本隔离的备份库
-# （offline/php/<版本>/apk/，整批对应一个 PHP 版本，预取并试装成功后立即入库），未命中时
+# （offline/php/<版本>/apk/，整批对应一个 PHP 版本，Docker 构建成功后才入库），未命中时
 # 借助与目标镜像同源的辅助容器，向一个空 root 做一次"全新安装"——apk 只下载缺失的包，
 # 直接 fetch 会跳过容器里已装的基础包导致闭包不完整；--initdb 的空 root 视为全未安装，
 # 拉下的 .apk 集合因此必然完整，且"能装完"本身就是对闭包的验证。预取失败仅返回 1 由
@@ -184,11 +184,44 @@ _php_stage_apk_closure() {
   if ! _php_apk_basesync_run "$ver" "$dest"; then
     log "警告：基础包同步失败（离线场景可忽略）；若构建报 breaks 版本冲突，请联网重试一次"
   fi
-  # 暂存集 = 依赖闭包 + 基础镜像全量包（当前镜像源版本）= 可离线安装的一致状态。晋升备份库
-  mkdir -p "$backup_dir"
-  cp "$dest"/*.apk "$backup_dir/" 2>/dev/null || true
-  log "apk 闭包已入备份库: offline/php/$ver/apk/（$(ls "$backup_dir" | wc -l) 个包）"
+  # 暂存集 = 依赖闭包 + 基础镜像全量包（当前镜像源版本）= 可离线安装的一致状态。
+  # 此处绝不写正式备份库，必须等 Docker 构建和扩展编译成功后再晋升。
+  log "apk 闭包暂存完成: $dest/（$(find "$dest" -maxdepth 1 -name '*.apk' -type f | wc -l) 个包，构建成功后入备份库）"
   return 0
+}
+
+# Docker 构建成功后才晋升 APK 闭包。用临时目录组装完整集合，再替换正式目录，避免备份库
+# 出现半套包或新旧版本混杂；构建失败路径不会调用此函数。
+_php_promote_apk_closure() {
+  local ver=$1 dest=$2
+  local backup_dir="$OFFLINE_DIR/php/$ver/apk"
+  local parent tmp old count size
+  count=$(find "$dest" -maxdepth 1 -name '*.apk' -type f 2>/dev/null | wc -l)
+  [ "$count" -gt 0 ] || return 0
+  parent=$(dirname "$backup_dir")
+  tmp="${backup_dir}.tmp.$$"
+  old="${backup_dir}.old.$$"
+  mkdir -p "$parent"
+  rm -rf "$tmp" "$old"
+  mkdir "$tmp"
+  if ! cp "$dest"/*.apk "$tmp/"; then
+    rm -rf "$tmp"
+    error "APK 闭包晋升失败：无法复制暂存包"
+  fi
+  if [ -e "$backup_dir" ]; then
+    mv "$backup_dir" "$old" || {
+      rm -rf "$tmp"
+      error "APK 闭包晋升失败：无法保留旧备份库"
+    }
+  fi
+  if ! mv "$tmp" "$backup_dir"; then
+    [ -e "$old" ] && mv "$old" "$backup_dir"
+    rm -rf "$tmp"
+    error "APK 闭包晋升失败：无法替换备份库"
+  fi
+  rm -rf "$old"
+  size=$(du -sh "$backup_dir" 2>/dev/null | cut -f1)
+  log "已验证入备份库: $backup_dir/（$count 个包，$size）"
 }
 
 # 渲染 Dockerfile（独立成函数便于测试断言）。参数分工：
@@ -323,6 +356,8 @@ _php_docker_build_verified() {
     _php_discard_staging "$build_dir"
     error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
   fi
+  log "PHP ${ver} 镜像构建成功，开始晋升已验证的离线依赖..."
+  _php_promote_apk_closure "$ver" "$build_dir/apk"
   _php_promote_pecl_tarballs "$ver" "$build_dir/pecl"
   # 晋升完成后清空两个暂存目录：正本在备份库（offline/php/<版本>/），残留只是垃圾，
   # 且 config/php/<版本>/{pecl,apk} 会被 phpbox backup 经 CONFIG_DIR 卷入造成双份冗余。
