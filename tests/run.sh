@@ -343,9 +343,10 @@ OFFLINE_DF=$(bash -c "
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/build.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
   _php_render_dockerfile 8.0 'bcmath,gd' 'imagick.tgz redis.tgz' 1")
 DEPS_N=$(echo "$OFFLINE_DF" | grep -n "apk add --no-network /tmp/apk" | cut -d: -f1)
-PECL_N=$(echo "$OFFLINE_DF" | grep -n "pecl install" | cut -d: -f1)
+PECL_N=$(echo "$OFFLINE_DF" | grep -n "phpize" | cut -d: -f1)
 INST_N=$(echo "$OFFLINE_DF" | grep -n "docker-php-ext-install" | cut -d: -f1)
 COPY_N=$(echo "$OFFLINE_DF" | grep -c "COPY pecl")
+assert_not_contains "离线：pecl 安装不经过 pear 联网环节（无 pecl install）" "$OFFLINE_DF" "pecl install"
 if [ -n "$DEPS_N" ] && [ -n "$PECL_N" ] && [ -n "$INST_N" ] && [ "$DEPS_N" -lt "$PECL_N" ] && [ "$DEPS_N" -lt "$INST_N" ]; then
   ok "离线：依赖安装层先于 pecl 与内置编译"
 else
@@ -357,8 +358,9 @@ ONLINE_DF=$(bash -c "
   source '$ROOT/lib/common.sh'; source '$ROOT/lib/build.sh'; source '$ROOT/lib/php.sh'; load_env 2>/dev/null
   _php_render_dockerfile 8.0 'bcmath,gd' 'imagick.tgz redis.tgz' 0")
 DEPS_N=$(echo "$ONLINE_DF" | grep -n 'PHPIZE_DEPS' | head -1 | cut -d: -f1)
-PECL_N=$(echo "$ONLINE_DF" | grep -n "pecl install" | cut -d: -f1)
+PECL_N=$(echo "$ONLINE_DF" | grep -n "phpize" | cut -d: -f1)
 COPY_N=$(echo "$ONLINE_DF" | grep -c "COPY pecl")
+assert_not_contains "在线：pecl 安装不经过 pear 联网环节（无 pecl install）" "$ONLINE_DF" "pecl install"
 if [ -n "$DEPS_N" ] && [ -n "$PECL_N" ] && [ "$DEPS_N" -lt "$PECL_N" ]; then
   ok "在线：依赖安装层先于 pecl 编译"
 else

@@ -11,16 +11,21 @@
 # 本地代理。关键教训：直连"单次探测通过"不代表构建期间稳定——一次构建会发起大量
 # 连接，任一被重置即失败。因此探测策略是代理优先：本地存在能通 pecl 的代理就走代理，
 # 只有探测不到代理时才直连（构建失败时由报错信息引导配置 BUILD_PROXY）。
-# 输出：代理 URL（stdout）；未探测到输出空串（走直连）
+# 探测必须用"构建容器视角"：本地代理（xray/v2rayN 等）常只监听 127.0.0.1，宿主侧直连
+# 探测当然通，但容器经 docker0 网关访问不到——曾因此选中假可用代理，构建时
+# connection refused。以 docker0 网桥 IP 探测（监听 0.0.0.0 才通，通即容器内可达），
+# 输出即网桥地址，可直接用作构建期 http_proxy，无需再做地址换算
 _php_detect_build_proxy() {
   command -v curl &>/dev/null || return 0
-  local port attempt
+  local bridge attempt port
+  bridge=$(ip -4 -o addr show docker0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+  bridge=${bridge:-172.17.0.1}
   for port in 10809 7890 8118 1087 1080 8888; do
     # -f：代理返回 4xx/5xx 也视为不可用（如仅 SOCKS 的端口对 HTTP 代理请求会报 400）；
     # 每端口重试一次：探测连接可能与代理上残留的连接竞争而瞬断，单次失败不足以判死
     for attempt in 1 2; do
-      if curl -4 -s -f --connect-timeout 3 --max-time 6 -x "http://127.0.0.1:$port" -o /dev/null https://pecl.php.net/channel.xml 2>/dev/null; then
-        echo "http://127.0.0.1:$port"
+      if curl -4 -s -f --connect-timeout 3 --max-time 6 -x "http://$bridge:$port" -o /dev/null https://pecl.php.net/channel.xml 2>/dev/null; then
+        echo "http://$bridge:$port"
         return 0
       fi
     done
@@ -185,7 +190,11 @@ _php_render_dockerfile() {
   local copy_exts="" pecl_loop=""
   if [ -n "$remote_files" ]; then
     copy_exts="COPY pecl/ /tmp/pecl/"
-    pecl_loop="RUN for t in /tmp/pecl/*.tgz; do [ -e \"\$t\" ] || { echo \"ERROR: /tmp/pecl/ 下没有 .tgz 包\"; exit 1; }; pecl install \"\$t\" && docker-php-ext-enable \"\$(basename \"\$t\" .tgz | sed 's/-[0-9][0-9.]*\$//')\" || exit 1; done"
+    # 零网络 pecl 安装：pecl install 对本地 tgz 仍会走 pear 的联网环节（实测 imagick
+    # 编译完成后卡在拉 PHP-Parser，两次构建同点挂死），所以绕开 pecl 命令，直接
+    # phpize/configure/make/make install——编译与安装（make install 仅拷 .so）均不触网，
+    # docker-php-ext-enable 只写 ini 同样离线。三态等价于 pecl install 的最终产物
+    pecl_loop="RUN set -e; for t in /tmp/pecl/*.tgz; do [ -e \"\$t\" ] || { echo \"ERROR: /tmp/pecl/ 下没有 .tgz 包\"; exit 1; }; d=\"/tmp/src/\$(basename \"\$t\" .tgz)\"; mkdir -p \"\$d\"; tar xzf \"\$t\" -C \"\$d\" --strip-components=1; (cd \"\$d\" && phpize && ./configure && make -j\"\$(nproc)\" && make install); docker-php-ext-enable \"\$(basename \"\$t\" .tgz | sed 's/-[0-9][0-9.]*\$//')\"; done"
   fi
   local apk_deps; apk_deps=$(_php_ext_apk_deps "$bundled,${remote_files//.tgz/}")
   local body=""
