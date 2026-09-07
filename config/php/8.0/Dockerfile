@@ -8,6 +8,6 @@ RUN cp /etc/apk/repositories /tmp/repos.orig && : > /etc/apk/repositories &&   f
 COPY apk/ /tmp/apk/
 COPY pecl/ /tmp/pecl/
 RUN apk add --no-network /tmp/apk/*.apk
-RUN for t in /tmp/pecl/*.tgz; do [ -e "$t" ] || { echo "ERROR: /tmp/pecl/ 下没有 .tgz 包"; exit 1; }; pecl install "$t" && docker-php-ext-enable "$(basename "$t" .tgz | sed 's/-[0-9][0-9.]*$//')" || exit 1; done
+RUN set -e; for t in /tmp/pecl/*.tgz; do [ -e "$t" ] || { echo "ERROR: /tmp/pecl/ 下没有 .tgz 包"; exit 1; }; d="/tmp/src/$(basename "$t" .tgz)"; mkdir -p "$d"; tar xzf "$t" -C "$d" --strip-components=1; (cd "$d" && phpize && ./configure && make -j"$(nproc)" && make install); docker-php-ext-enable "$(basename "$t" .tgz | sed 's/-[0-9][0-9.]*$//')"; done
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp --with-xpm &&  docker-php-ext-install -j"$(nproc)" bcmath exif gd intl mysqli opcache pdo_mysql pdo_pgsql pgsql soap sockets zip
 RUN usermod -u ${UID} www-data && groupmod -g ${GID} www-data

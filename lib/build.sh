@@ -197,7 +197,10 @@ _php_promote_apk_closure() {
   local backup_dir="$OFFLINE_DIR/php/$ver/apk"
   local parent tmp old count size
   count=$(find "$dest" -maxdepth 1 -name '*.apk' -type f 2>/dev/null | wc -l)
-  [ "$count" -gt 0 ] || return 0
+  if [ "$count" -eq 0 ]; then
+    error "APK 闭包晋升失败：暂存目录没有 .apk（暂存: $dest，目标: $backup_dir）"
+  fi
+  log "开始晋升已验证 APK 闭包: $dest/ → $backup_dir/（$count 个包）"
   parent=$(dirname "$backup_dir")
   tmp="${backup_dir}.tmp.$$"
   old="${backup_dir}.old.$$"
@@ -218,6 +221,13 @@ _php_promote_apk_closure() {
     [ -e "$old" ] && mv "$old" "$backup_dir"
     rm -rf "$tmp"
     error "APK 闭包晋升失败：无法替换备份库"
+  fi
+  if ! _php_apk_closure_verify "$backup_dir"; then
+    rm -rf "$backup_dir"
+    if [ -e "$old" ]; then
+      mv "$old" "$backup_dir" || error "APK 闭包晋升失败：目标校验失败且旧备份库恢复失败"
+    fi
+    error "APK 闭包晋升失败：目标备份库完整性校验失败（目标: $backup_dir）"
   fi
   rm -rf "$old"
   size=$(du -sh "$backup_dir" 2>/dev/null | cut -f1)
@@ -348,8 +358,8 @@ _php_discard_staging() {
 # 失败→彻底删除全部暂存目录后报错退出。
 # 二选一是刻意的：失败路径绝不晋升，保证备份库里只有对本 PHP 版本验证可用的内容
 _php_docker_build_verified() {
-  local img=$1 build_dir=$2 ver=$3
-  shift 3
+  local img=$1 build_dir=$2 ver=$3 offline=$4
+  shift 4
   local build_rc=0
   docker build -t "$img" "$@" "$build_dir" || build_rc=$?
   if [ $build_rc -ne 0 ]; then
@@ -357,7 +367,11 @@ _php_docker_build_verified() {
     error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
   fi
   log "PHP ${ver} 镜像构建成功，开始晋升已验证的离线依赖..."
-  _php_promote_apk_closure "$ver" "$build_dir/apk"
+  if [ "$offline" = "1" ]; then
+    _php_promote_apk_closure "$ver" "$build_dir/apk"
+  else
+    log "PHP ${ver} 未使用 APK 离线闭包，跳过 APK 备份库晋升"
+  fi
   _php_promote_pecl_tarballs "$ver" "$build_dir/pecl"
   # 晋升完成后清空两个暂存目录：正本在备份库（offline/php/<版本>/），残留只是垃圾，
   # 且 config/php/<版本>/{pecl,apk} 会被 phpbox backup 经 CONFIG_DIR 卷入造成双份冗余。
@@ -423,7 +437,7 @@ _php_build_image() {
   fi
 
   log "构建 PHP ${ver} 自定义镜像（扩展: ${exts:-无}）..."
-  _php_docker_build_verified "$img" "$build_dir" "$ver" \
+  _php_docker_build_verified "$img" "$build_dir" "$ver" "$offline" \
     --build-arg UID="$CURRENT_UID" \
     --build-arg GID="$CURRENT_GID" \
     --build-arg APK_MIRRORS="$APK_MIRRORS" \
