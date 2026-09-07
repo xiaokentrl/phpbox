@@ -261,9 +261,11 @@ load_env() {
   OFFLINE_DIR="${OFFLINE_DIR:-$BASE_DIR/offline}"
   if [ "$OFFLINE_DIR" = "~" ]; then
     OFFLINE_DIR="$HOME"
-  elif [[ "$OFFLINE_DIR" == ~/* ]]; then
-    OFFLINE_DIR="$HOME/${OFFLINE_DIR#~/}"
-  elif [[ "$OFFLINE_DIR" != /* ]]; then
+  elif [ "${OFFLINE_DIR:0:2}" = "~/" ]; then
+    OFFLINE_DIR="$HOME/${OFFLINE_DIR:2}"
+  elif [ "${OFFLINE_DIR:0:2}" = "./" ]; then
+    OFFLINE_DIR="$BASE_DIR/${OFFLINE_DIR:2}"
+  elif [ "${OFFLINE_DIR:0:1}" != "/" ]; then
     OFFLINE_DIR="$BASE_DIR/$OFFLINE_DIR"
   fi
   # PHP 缺省安装的扩展集（php install 不带 --ext 时生效）。
