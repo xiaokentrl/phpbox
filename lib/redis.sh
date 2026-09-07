@@ -1,12 +1,28 @@
 #!/bin/bash
 # shellcheck shell=bash
 
+# Redis 官方稳定主版本 tag：redis:8-alpine 会跟随 Redis 8 稳定版补丁发布。
+_REDIS_DEFAULT_VERSION=8
+
+_init_redis_config() {
+  local dir=$1
+  cat > "$dir/redis.conf" <<'EOF'
+# phpbox local Redis configuration. Edit this file and recreate the Redis service to apply changes.
+appendonly yes
+dir /data
+protected-mode yes
+timeout 0
+tcp-keepalive 300
+EOF
+}
+
 _redis_generate_compose() {
   local ver=$1
   local svc_key=$(get_service_key "redis" "$ver")
   local cname=$(get_container_name "redis" "$ver")
   local vol_name=$(get_volume_name "redis" "$ver")
   local port=$(get_or_set_port "redis" "$ver" "6379")
+  local password_key="REDIS_${ver//./}_ROOT_PASSWORD"
   local yml="$EXT_DIR/redis-${ver}.yml"
 
   cat > "$yml" <<YEOF
@@ -21,10 +37,12 @@ services:
   $svc_key:
     image: redis:${ver}-alpine
     container_name: $cname
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "\${${password_key}}"]
     ports:
       - "\${REDIS_${ver//./}_PORT}:6379"
     volumes:
       - $vol_name:/data
+      - ./config/redis/${ver}/redis.conf:/usr/local/etc/redis/redis.conf:ro
     networks:
       - net
     restart: unless-stopped
@@ -32,7 +50,7 @@ services:
       - "${PROJECT_NAME}${LABEL_SEPARATOR}service=redis"
       - "${PROJECT_NAME}${LABEL_SEPARATOR}version=${ver}"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \${${password_key}} --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -44,9 +62,11 @@ _redis_ensure_running() {
   local svc_key=$(get_service_key "redis" "$ver")
   run_compose "redis" "$ver" up -d "$svc_key"
   local cname=$(get_container_name "redis" "$ver")
+  local password_key="REDIS_${ver//./}_ROOT_PASSWORD"
+  local password; password=$(read_env_value "$password_key" "")
   local timeout=20
   while [ $timeout -gt 0 ]; do
-    if docker exec "$cname" redis-cli ping | grep -q PONG; then
+    if docker exec "$cname" redis-cli -a "$password" --no-auth-warning ping | grep -q PONG; then
       return 0
     fi
     sleep 2
@@ -56,9 +76,11 @@ _redis_ensure_running() {
 }
 
 _redis_install() {
-  local ver="${1:-}"
-  [ -z "$ver" ] && error "用法: phpbox redis install <版本> [--port 端口]"
-  shift
+  local ver="$_REDIS_DEFAULT_VERSION"
+  if [ $# -gt 0 ] && [[ "$1" != --* ]]; then
+    ver=$1
+    shift
+  fi
   _generic_service_install "redis" "$ver" "6379" "$@"
 }
 

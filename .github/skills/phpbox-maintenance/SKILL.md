@@ -37,6 +37,12 @@ disable-model-invocation: false
 
 最小验收重点：离线模式无 `.apk` 必须失败；在线降级必须明确跳过 APK 晋升；Docker 构建失败不能新增或覆盖 `offline/`；目标目录校验失败必须恢复旧库。
 
+## Redis 本地配置流程
+
+- `redis install` 必须创建 `config/redis/<版本>/redis.conf`，文件不存在或不完整时才生成默认模板，已有用户配置不得覆盖。
+- Redis Compose 必须只读挂载 `./config/redis/<版本>/redis.conf`，并以该文件作为 `redis-server` 配置入口；修改后通过重建或重新安装服务使配置生效。
+- Redis 认证密码只从 `.env` 的 `REDIS_<去点版本>_ROOT_PASSWORD` 注入启动参数，不写入 `redis.conf`；备份必须包含 `config/redis/` 和 `.env`。
+
 ## 强制行为
 
 - 每个用户可感知步骤都要输出阶段和状态。

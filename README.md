@@ -58,7 +58,7 @@ phpbox list                             # 查看已安装服务
 
 | 命令 | 说明 |
 | --- | --- |
-| `phpbox redis install <版本> [--port 端口]` | 安装 Redis |
+| `phpbox redis install [<版本>] [--port 端口]` | 安装 Redis；省略版本使用最新稳定主版本 Redis 8，省略端口使用 6379，密码保存到 `.env` 的 `REDIS_<去点版本>_ROOT_PASSWORD` |
 | `phpbox redis port set <版本> <新端口>` | 修改端口 |
 | `phpbox redis list` | 列出所有 Redis 实例 |
 | `phpbox redis uninstall <版本> [--purge]` | 卸载 |
@@ -107,6 +107,7 @@ phpbox list                             # 查看已安装服务
 | `NGINX_VERSION` | `alpine` | Nginx 镜像 tag；换 tag 只换主配置目录，站点目录不变 |
 | `PHP_DEFAULT_EXTENSIONS` | 见 `.env.example` | `php install` 不带 `--ext` 时的默认扩展集 |
 | `MYSQL_<去点版本>_PORT` / `MYSQL_<去点版本>_ROOT_PASSWORD` | `3380`/`3384`、自动生成 | 如 `MYSQL_84_PORT`、`MYSQL_84_ROOT_PASSWORD`；安装前预置密码即生效 |
+| `REDIS_<去点版本>_PORT` / `REDIS_<去点版本>_ROOT_PASSWORD` | `6379`、自动生成 | 如 `REDIS_8_PORT`、`REDIS_8_ROOT_PASSWORD`；Redis 安装完成后自动写入 `.env` |
 | `*_SERVICE_PREFIX`、`*_SEPARATOR`、`IMAGE_PREFIX` | 见 `.env.example` | 容器名 / 镜像 tag / 标签的命名规则 |
 
 ## 目录结构
@@ -143,7 +144,7 @@ $HOME/phpbox/
 | `.env` | `install.sh`（含明文密码，绝不入仓） |
 | `compose/docker-compose.yml`、`compose/services/*.yml` | `install.sh` / 各服务安装命令 |
 | `config/php/*/Dockerfile`、`config/php/*/php.ini` | `php install`、`php extension add/remove` |
-| `config/mysql/*/my.cnf`、`config/nginx/*/{nginx.conf,conf.d/}` | 首次安装对应服务时从镜像提取或按版本生成 |
+| `config/mysql/*/my.cnf`、`config/nginx/*/{nginx.conf,conf.d/}`、`config/redis/*/redis.conf` | 首次安装对应服务时从镜像提取或按版本生成，用户可直接修改 |
 | `config/nginx/sites/*.conf` | `site add` |
 | `config/php/*/extensions.env`、`logs/*.log`、`backups/*.tar.gz` | 安装过程与运行期 |
 

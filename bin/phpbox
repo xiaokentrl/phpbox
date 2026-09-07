@@ -35,7 +35,7 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
   mysql list                                 列出所有 MySQL
   mysql uninstall <版本> [--purge]           卸载 MySQL
 
-  redis install <版本> [--port 端口]          安装 Redis
+  redis install [<版本>] [--port 端口]        安装 Redis（默认最新稳定版 Redis 8，默认端口 6379）
   redis port set <版本> <新端口>              修改端口
   redis list                                 列出所有 Redis
   redis uninstall <版本> [--purge]           卸载 Redis
@@ -64,6 +64,7 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
   MYSQL_DATA_ROOT MySQL 数据主目录（默认$HOME/mysql-data）
   MYSQL_80_ROOT_PASSWORD  预设 MySQL 8.0 的 root 密码（安装前写入 .env 即生效，键名规则 MYSQL_<去点版本>_ROOT_PASSWORD，未预设则自动生成）
   PHP_DEFAULT_EXTENSIONS  PHP 默认安装的扩展集（php install 不带 --ext 时生效，逗号分隔）
+  REDIS_<去点版本>_ROOT_PASSWORD  Redis 认证密码（redis install 自动生成并保存）
   APK_MIRRORS     Alpine 镜像源兜底列表（空格分隔；使用前自动测速按最快优先下载，超时自动切换）
   APK_TIMEOUT     镜像源网络超时秒数（默认 30；测速/索引获取/下载无响应判定共用）
   BUILD_PROXY     PHP 构建代理（auto=自动探测本地代理，默认；none=禁用；或直接指定 host:port）

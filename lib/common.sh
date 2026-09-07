@@ -328,7 +328,7 @@ get_service_key() { echo "${1}${2//./}"; }
 # 版本号会被拼进文件名、容器名、镜像 tag 和 .env 键名——空格/分号等字符会注入破坏这些位置，
 # 甚至写出含空格的 .env 键污染后续所有命令
 validate_version() {
-  [[ "$1" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || error "无效版本号: $1（示例: 8.4、8.0.35）"
+  [[ "$1" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || error "无效版本号: $1（示例: 8、8.4、8.0.35）"
 }
 
 # 端口在 .env 中的键名：服务名_去点版本_PORT 转大写（如 MYSQL_84_PORT）
@@ -563,6 +563,7 @@ init_config_files() {
     nginx) check_file="$dir/nginx.conf" ;;
     php)   check_file="$dir/php.ini" ;;
     mysql) check_file="$dir/my.cnf" ;;
+    redis) check_file="$dir/redis.conf" ;;
   esac
 
   if [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ] && [ -f "$check_file" ]; then
@@ -577,6 +578,7 @@ init_config_files() {
     nginx) _init_nginx_config "$dir" "$ver" ;;
     php)   _init_php_config "$dir" "$ver" ;;
     mysql) _init_mysql_config "$dir" "$ver" ;;
+    redis) _init_redis_config "$dir" ;;
   esac
 
   chown -R "$CURRENT_UID:$CURRENT_GID" "$dir" 2>/dev/null || true
@@ -593,7 +595,7 @@ _generic_service_install() {
   # 不拦的话要走到拉取阶段才报一句 "denied"，前面的配置/属主设置全白做
   case "$svc" in
     mysql) [[ "$ver" == 5.* || "$ver" == 8.* || "$ver" == 9.* ]] || error "MySQL 不存在 ${ver%%.*}.x 版本（5.7 之后直接是 8.0），可用版本线: 5.7 / 8.0 / 8.4 / 9.x" ;;
-    redis) [[ "$ver" == [4-9].* ]] || error "Redis 可用版本线: 4.x / 5.x / 6.x / 7.x / 8.x" ;;
+    redis) [[ "$ver" == [4-9] || "$ver" == [4-9].* ]] || error "Redis 可用版本线: 4.x / 5.x / 6.x / 7.x / 8.x" ;;
   esac
   if [ -f "$EXT_DIR/${svc}-${ver}.yml" ]; then
     error "${svc} ${ver} 已安装"
@@ -626,7 +628,11 @@ _generic_service_install() {
   init_config_files "$svc" "$ver"
   case "$svc" in
     mysql) _mysql_generate_compose "$ver"; _mysql_ensure_running "$ver" ;;
-    redis) _redis_generate_compose "$ver"; _redis_ensure_running "$ver" ;;
+    redis)
+      get_or_set_password "redis" "$ver" > /dev/null
+      _redis_generate_compose "$ver"
+      _redis_ensure_running "$ver"
+      ;;
   esac
   # up 之后端口已定（用户指定或自动挑选时均已写入 .env），只读不再复查：
   # 此时宿主机端口已被刚启动的容器自己监听，复查会被误判为"被占"而改写 .env、报错端口

@@ -58,7 +58,7 @@ _php_stage_pecl_tarballs() {
   local ver=$1 remote_list=$2 build_dir=$3
   local dest="$build_dir/pecl"
   local backup_dir="$OFFLINE_DIR/php/$ver/pecl"
-  mkdir -p "$backup_dir" "$dest"
+  mkdir -p "$dest"
   log "pecl 备份库: $backup_dir → 构建目录: $dest"
   local proxy="${BUILD_PROXY:-auto}"
   if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
@@ -99,12 +99,41 @@ _php_promote_pecl_tarballs() {
   local ver=$1 dest=$2
   [ -n "$_PECL_STAGED" ] || return 0
   local backup_dir="$OFFLINE_DIR/php/$ver/pecl"
-  mkdir -p "$backup_dir"
-  local fname
+  local parent tmp old fname
+  parent=$(dirname "$backup_dir")
+  tmp="${backup_dir}.tmp.$$"
+  old="${backup_dir}.old.$$"
+  mkdir -p "$parent"
+  rm -rf "$tmp" "$old"
+  mkdir "$tmp"
+  if [ -d "$backup_dir" ]; then
+    cp "$backup_dir"/*.tgz "$tmp/" 2>/dev/null || true
+  fi
   for fname in $_PECL_STAGED; do
-    cp "$dest/$fname" "$backup_dir/$fname"
+    if [ ! -s "$dest/$fname" ]; then
+      rm -rf "$tmp"
+      error "PECL 晋升失败：暂存包不存在或为空（暂存: $dest/$fname，目标: $backup_dir/$fname）"
+    fi
+    cp "$dest/$fname" "$tmp/$fname" || {
+      rm -rf "$tmp"
+      error "PECL 晋升失败：无法复制暂存包（暂存: $dest/$fname）"
+    }
+  done
+  if [ -e "$backup_dir" ]; then
+    mv "$backup_dir" "$old" || {
+      rm -rf "$tmp"
+      error "PECL 晋升失败：无法保留旧备份库（目标: $backup_dir）"
+    }
+  fi
+  if ! mv "$tmp" "$backup_dir"; then
+    [ -e "$old" ] && mv "$old" "$backup_dir"
+    rm -rf "$tmp"
+    error "PECL 晋升失败：无法替换备份库（目标: $backup_dir）"
+  fi
+  for fname in $_PECL_STAGED; do
     log "已验证入备份库: $backup_dir/$fname"
   done
+  rm -rf "$old"
   _PECL_STAGED=""
 }
 
@@ -321,7 +350,8 @@ _php_resolve_build_proxy() {
     http://*|https://*) : ;;
     *) proxy="http://${proxy}" ;;
   esac
-  local proxy_gw=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+  local proxy_gw
+  proxy_gw=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)
   if [ -n "$proxy_gw" ]; then
     proxy="${proxy//127.0.0.1/$proxy_gw}"
     proxy="${proxy//localhost/$proxy_gw}"
@@ -361,10 +391,15 @@ _php_docker_build_verified() {
   local img=$1 build_dir=$2 ver=$3 offline=$4
   shift 4
   local build_rc=0
-  docker build -t "$img" "$@" "$build_dir" || build_rc=$?
+  local build_timeout=3600
+  log "Docker 构建开始：PHP ${ver}，超时 ${build_timeout}s，构建上下文: $build_dir"
+  timeout --foreground "$build_timeout" docker build -t "$img" "$@" "$build_dir" || build_rc=$?
   if [ $build_rc -ne 0 ]; then
     _php_discard_staging "$build_dir"
-    error "PHP 镜像构建失败（网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
+    if [ $build_rc -eq 124 ]; then
+      error "PHP 镜像构建超时（${build_timeout}s），已清理暂存；旧离线库保持不变"
+    fi
+    error "PHP 镜像构建失败（退出码: $build_rc；网络受限时可在 .env 配置 BUILD_PROXY 指向本地 HTTP 代理）"
   fi
   log "PHP ${ver} 镜像构建成功，开始晋升已验证的离线依赖..."
   if [ "$offline" = "1" ]; then
@@ -385,7 +420,8 @@ _php_online_build_args() {
   local proxy=$1 apk_mirror=$2
   if [ -n "$apk_mirror" ]; then
     local apk_mirror_host="${apk_mirror#*://}"; apk_mirror_host="${apk_mirror_host%%/*}"
-    local apk_mirror_ip=$(getent ahostsv4 "$apk_mirror_host" 2>/dev/null | awk '{print $1; exit}' || true)
+    local apk_mirror_ip
+    apk_mirror_ip=$(getent ahostsv4 "$apk_mirror_host" 2>/dev/null | awk '{print $1; exit}' || true)
     if [ -n "$apk_mirror_ip" ]; then echo "--add-host"; echo "$apk_mirror_host:$apk_mirror_ip"; fi
   fi
   if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then
