@@ -225,30 +225,15 @@ _go_server() {
 }
 
 _go_list() {
-  echo "Go 镜像:"
-  local image_rows container_rows
-  image_rows=$(docker image ls golang --format '{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' 2>/dev/null || true)
-  if [ -n "$image_rows" ]; then
-    printf "  %-28s %-14s %s\n" "镜像" "IMAGE ID" "大小"
-    while IFS=$'\t' read -r image image_id image_size; do
-      printf "  %-28s %-14s %s\n" "$image" "$image_id" "$image_size"
-    done <<< "$image_rows"
-  else
-    echo "  (未安装 Go 镜像)"
-  fi
+  local label_prefix="${PROJECT_NAME}${LABEL_SEPARATOR}"
+  local container_format="table {{.Names}}\tgo\t{{.Label \"${label_prefix}version\"}}\t{{.Ports}}\t{{.Status}}"
+
+  echo "Go 容器:"
+  docker ps -a --filter "label=${label_prefix}service=go" --format "$container_format"
 
   echo
-  echo "Go 容器:"
-  container_rows=$(docker ps -a --filter "label=${PROJECT_NAME}${LABEL_SEPARATOR}service=go" \
-    --format '{{.Label "'"${PROJECT_NAME}${LABEL_SEPARATOR}"'project}}\t{{.Names}}\t{{.Image}}\t{{.Status}}' 2>/dev/null || true)
-  if [ -n "$container_rows" ]; then
-    printf "  %-24s %-24s %-28s %s\n" "项目" "容器" "镜像" "状态"
-    while IFS=$'\t' read -r project container image status; do
-      printf "  %-24s %-24s %-28s %s\n" "$project" "$container" "$image" "$status"
-    done <<< "$container_rows"
-  else
-    echo "  (未创建 Go 容器)"
-  fi
+  echo "Go 镜像:"
+  docker image ls golang --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
 }
 
 _go_exec() {
