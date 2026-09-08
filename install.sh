@@ -4,7 +4,7 @@ set -euo pipefail
 
 echo ">>> 创建目录结构..."
 # sites 是唯一的站点目录（每个站点一个 <域名>.conf），不随 Nginx 版本变化，故不建 conf.d
-mkdir -p ~/phpbox/{bin,lib,compose/services,config/{php,mysql,nginx/sites},logs/{nginx,php},backups,state}
+mkdir -p ~/phpbox/{bin,lib,compose/services,config/{php,mysql,nginx/sites},logs/{nginx,php},backups,state,cache/go}
 
 echo ">>> 复制 CLI 源码..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,6 +59,13 @@ BACKUP_NAME_SEPARATOR=-
 IMAGE_PREFIX=phpbox
 PHP_DEFAULT_EXTENSIONS=gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug
 BUILD_PROXY=auto
+GO_PROJECTS_ROOT=$HOME/www
+GO_DEFAULT_VERSION=alpine
+GO_DEFAULT_PORT=8080
+GO_PROXY=https://goproxy.cn,direct
+GO_CACHE_ROOT=$HOME/phpbox/cache/go
+GO_CGO_ENABLED=0
+GO_SERVICE_PREFIX=go
 ENVEOF
     echo "已生成 .env，请根据实际情况调整（如 WWW_ROOT、MYSQL_DATA_ROOT）"
 fi

@@ -277,6 +277,32 @@ load_env() {
   PHP_DEFAULT_EXTENSIONS="${PHP_DEFAULT_EXTENSIONS:-gd,redis,pdo_mysql,mysqli,pgsql,pdo_pgsql,zip,bcmath,intl,opcache,exif,soap,sockets,imagick,xdebug}"
   # PHP 镜像构建的网络适配（镜像源列表解析见 _load_apk_mirrors）：
   BUILD_PROXY="${BUILD_PROXY:-auto}"
+  GO_PROJECTS_ROOT="${GO_PROJECTS_ROOT:-$HOME/www}"
+  GO_DEFAULT_VERSION="${GO_DEFAULT_VERSION:-alpine}"
+  GO_DEFAULT_PORT="${GO_DEFAULT_PORT:-8080}"
+  GO_PROXY="${GO_PROXY:-https://goproxy.cn,direct}"
+  GO_CACHE_ROOT="${GO_CACHE_ROOT:-$BASE_DIR/cache/go}"
+  GO_CGO_ENABLED="${GO_CGO_ENABLED:-0}"
+  GO_SERVICE_PREFIX="${GO_SERVICE_PREFIX:-go}"
+  for go_path_var in GO_PROJECTS_ROOT GO_CACHE_ROOT; do
+    go_path_value="${!go_path_var}"
+    if [ "$go_path_value" = "~" ]; then
+      go_path_value="$HOME"
+    elif [[ "$go_path_value" == "~/"* ]]; then
+      go_path_value="$HOME/${go_path_value:2}"
+    elif [[ "$go_path_value" == "./"* ]]; then
+      go_path_value="$BASE_DIR/${go_path_value:2}"
+    elif [[ "$go_path_value" != "/"* ]]; then
+      go_path_value="$BASE_DIR/$go_path_value"
+    fi
+    printf -v "$go_path_var" '%s' "$go_path_value"
+  done
+  case "$GO_DEFAULT_VERSION" in
+    alpine|latest) : ;;
+    *) validate_version "$GO_DEFAULT_VERSION" ;;
+  esac
+  [[ "$GO_DEFAULT_PORT" =~ ^[1-9][0-9]{0,4}$ && "$GO_DEFAULT_PORT" -le 65535 ]] || error "无效的 GO_DEFAULT_PORT: $GO_DEFAULT_PORT"
+  [[ "$GO_CGO_ENABLED" == 0 || "$GO_CGO_ENABLED" == 1 ]] || error "无效的 GO_CGO_ENABLED: $GO_CGO_ENABLED（应为 0 或 1）"
   # 镜像源网络超时秒数（正整数）：源测速、索引获取、下载"无响应"判定三处共用
   APK_TIMEOUT="${APK_TIMEOUT:-30}"
   if ! [[ "$APK_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
@@ -284,9 +310,9 @@ load_env() {
   fi
   _load_apk_mirrors
 
-  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR APK_MIRRORS APK_TIMEOUT BUILD_PROXY OFFLINE_DIR
+  export PROJECT_NAME NETWORK_NAME WWW_ROOT IMAGE_PREFIX LABEL_SEPARATOR IMAGE_TAG_SEPARATOR BACKUP_NAME_SEPARATOR NGINX_PORT NGINX_VERSION CURRENT_UID CURRENT_GID MYSQL_DATA_ROOT PHP_DEFAULT_EXTENSIONS APK_MIRROR APK_MIRRORS APK_TIMEOUT BUILD_PROXY OFFLINE_DIR GO_PROJECTS_ROOT GO_DEFAULT_VERSION GO_DEFAULT_PORT GO_PROXY GO_CACHE_ROOT GO_CGO_ENABLED GO_SERVICE_PREFIX
   # SITES_DIR 由 site.sh 定义；仅加载部分库时回退到默认站点目录，确保目录始终存在
-    mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$PHP_CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MYSQL_DATA_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
+    mkdir -p "$WWW_ROOT" "$COMPOSE_DIR" "$EXT_DIR" "$CONFIG_DIR" "$PHP_CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MYSQL_DATA_ROOT" "$GO_CACHE_ROOT" "${SITES_DIR:-$CONFIG_DIR/nginx/sites}"
 
     # 兼容旧版本：扩展清单曾位于顶层 state/，只在新文件不存在时迁移，绝不覆盖已有配置。
     local legacy_file legacy_name compact_version version target_file

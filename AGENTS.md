@@ -3,7 +3,7 @@
 ## 1. 项目定位
 
 - **项目类型**：纯 Bash 实现的本地 Docker LNMP 多版本开发环境管理器。
-- **核心服务**：PHP、MySQL、Redis、Nginx，以及站点和 hosts 管理。
+- **核心服务**：PHP、MySQL、Redis、Nginx、Go，以及站点和 hosts 管理。
 - **运行边界**：只面向本地开发，不作为生产部署系统。
 - **首要目标**：可查阅、可恢复、可重复安装、长操作有反馈、失败不破坏旧状态。
 - **技术栈**：Bash 4.4+、Docker、Docker Compose、Alpine APK、PECL、Shell 脚本测试。
@@ -24,6 +24,7 @@
 | Compose、Dockerfile、vhost 生成物 | 生成脚本 | 修改生成逻辑后重新生成 |
 | 数据目录和 Docker 数据卷 | 用户数据 | 默认保留，禁止隐式删除 |
 | `offline/` 缓存 | 构建事务 | 仅成功验证后晋升 |
+| `cache/go/` | Go 开发缓存 | 按 Go 版本保存 GOPATH 模块和工具缓存，不作为完整离线仓库 |
 | 临时文件、容器、镜像和锁 | 当前事务 | 成功或失败后清理 |
 
 ## 2. 总体优化路线
@@ -119,6 +120,18 @@ config/php/
 - 后续可引入 `minimal`、`web`、`debug` profile；在没有明确需求前不扩大改动范围。
 - `xdebug` 等重扩展是否默认启用，应评估构建时间、镜像体积和运行开销。
 
+### 2.6 Go 开发环境契约
+
+- Go 项目不由 phpbox 创建；`GO_PROJECTS_ROOT` 的直接子目录中存在 `go.mod` 即自动发现，目录名作为项目名。
+- 全局 `.env` 提供 `GO_DEFAULT_VERSION`、`GO_DEFAULT_PORT`、`GO_PROXY`、`GO_CACHE_ROOT` 和 `GO_CGO_ENABLED`；项目根目录 `.env` 只覆盖 `GO_VERSION`、`GO_PORT` 和 `GO_CGO_ENABLED`。
+- `phpbox go install` 只拉取并记录 Go 镜像默认版本；不创建没有源码挂载的空容器。项目容器由 `go run/test/shell` 按项目生成。
+- `GO_DEFAULT_VERSION=alpine` 表示 `golang:alpine` 最新稳定镜像；数字版本 `1.24` 映射为 `golang:1.24-alpine`。版本归一化只能由 `lib/go.sh` 的公共函数实现。
+- Go 容器内路径固定为 `/workspace`、`GOROOT=/usr/local/go`、`GOPATH=/go`；宿主机缓存为 `GO_CACHE_ROOT/<版本>/`。
+- `phpbox go list` 只负责列出 Go 镜像和 Go 容器；`phpbox go server` 负责列出自动发现的项目及状态，避免两个命令职责混淆。
+- Go 项目不发布独立宿主机端口；Nginx 已运行时，按 `<项目名>.test -> go-<项目名>:GO_PORT` 生成代理，hosts 修改仍需用户显式执行。
+- Go 缓存只是模块/工具缓存，不是完整离线仓库；备份包含源码和 `.env`，不包含 `cache/go/` 或 Docker 镜像。
+- Go 镜像卸载使用 `go uninstall 1.24` 或 `go uninstall latest`；镜像仍被项目容器使用时拒绝删除，`--purge` 才删除对应缓存。
+
 ## 3. 目录和架构
 
 ```text
@@ -132,6 +145,7 @@ phpbox/
 │   ├── redis.sh                  # Redis 生命周期和端口
 │   ├── nginx.sh                  # Nginx 生命周期、配置和重载
 │   ├── site.sh                   # 站点、vhost、PHP 版本切换
+│   ├── go.sh                     # Go 镜像、项目发现、容器和缓存管理
 │   └── backup.sh                 # 备份、恢复、归档安全检查
 ├── compose/
 │   ├── docker-compose.yml        # 共享网络等主配置
@@ -140,6 +154,7 @@ phpbox/
 │   ├── mysql/<版本>/
 │   ├── nginx/<版本>/
 │   └── php/<版本>/
+├── cache/go/<版本>/              # Go GOPATH 模块和工具缓存
 ├── offline/php/<版本>/           # 已验证的 APK/PECL 离线缓存
 ├── logs/                         # Nginx 和 PHP 日志
 ├── backups/                      # 备份归档
@@ -224,7 +239,7 @@ bin/phpbox
 - `bin/phpbox` 只负责命令路由、参数转发和统一退出结果，不实现业务规则。
 - `lib/common.sh` 只提供环境、日志、路径、外部命令执行、公共校验和回滚基础设施；不得持续吸收具体服务的业务逻辑。
 - `lib/build.sh` 负责 PHP 构建编排；网络下载、APK/PECL 资产准备、Dockerfile 渲染、镜像构建和缓存晋升应保持可分辨的函数边界。
-- `lib/php.sh`、`lib/mysql.sh`、`lib/redis.sh`、`lib/nginx.sh`、`lib/site.sh` 只负责各自领域，不得反向调用 CLI 入口或依赖其他业务模块的私有函数。
+- `lib/php.sh`、`lib/mysql.sh`、`lib/redis.sh`、`lib/nginx.sh`、`lib/site.sh`、`lib/go.sh` 只负责各自领域，不得反向调用 CLI 入口或依赖其他业务模块的私有函数。
 - 跨模块调用必须通过公共函数或明确的回调契约；不得依赖文件加载顺序提供隐式函数。
 - 生成配置必须先写临时文件并校验，成功后原子替换正式文件；运行期生成物不得被当作源码维护。
 - 同一生命周期模式只保留一个公共实现：预检 -> 准备 -> 执行 -> 健康检查 -> 提交/回滚。
