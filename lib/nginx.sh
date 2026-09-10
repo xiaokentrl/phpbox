@@ -8,14 +8,4 @@ source "$(dirname "${BASH_SOURCE[0]}")/nginx/common/install.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/nginx/common/reload.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/nginx/common/config.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/nginx/cli.sh"
-
-# 【迁移暂留，php 切片时迁往 lib/php/common/config.sh】
-# 此函数物理上一直定义在 nginx.sh，但语义属 php 线；它留在桥文件（而非 nginx 线
-# 新结构文件）是为保证新结构文件从诞生起就不含他线逻辑，桥文件本身第 6 步会删除。
-_init_php_config() {
-  local dir=$1 ver=$2
-  docker run --rm -v "$dir":/out "php:${ver}-fpm-alpine" \
-    sh -c "cp /usr/local/etc/php/php.ini-production /out/php.ini" || {
-    rm -rf "$dir"; error "PHP 配置提取失败"
-  }
-}
+# _init_php_config 已随 php 切片归位 lib/php/common/config.sh（原历史错位于本文件）
