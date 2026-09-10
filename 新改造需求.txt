@@ -1,0 +1,504 @@
+phpbox 重构需求说明（最终版）
+
+一、目标
+
+本次重构的核心目标：
+
+1. 让目录结构能够直接表达职责归属。
+2. 让脚本命名能够直接说明它属于哪条线、哪层能力。
+3. 明确区分：
+   - 全局公共能力
+   - 服务线公共能力
+   - 版本差异能力
+   - 运行时产物
+4. 禁止把不同层级的逻辑混在同一个目录或同一个脚本中。
+5. 保证调用链清晰：入口 -> 全局公共 -> 服务线公共 -> 版本差异。
+6. 保持兼容，尽量用小步重构，不要一次性砸掉现有代码。
+
+
+二、重构原则
+
+1. 作用域优先原则
+   - 全局公共能力放到 lib/common/
+   - PHP 线公共能力放到 lib/php/common/
+   - MySQL 线公共能力放到 lib/mysql/common/
+   - Nginx 线公共能力放到 lib/nginx/common/
+   - Redis 线公共能力放到 lib/redis/common/
+   - Go 线公共能力放到 lib/go/common/
+   - 版本差异放到各服务目录下的 versions/
+
+2. 目录语义必须自解释
+   - 目录名必须让人看一眼知道它属于哪条线
+   - 目录名不能模糊，例如 shared、utils、misc、helper
+   - 文件名必须说明职责，例如 install.sh、build.sh、reload.sh、config.sh、port.sh
+
+3. 版本不作为主目录层级
+   - 版本只作为参数和运行时目录名称，不作为脚本大目录复制结构
+   - 版本差异单独放在 versions/ 目录中
+   - 不允许出现 php/7.4/install.sh 这种重复脚本复制结构
+
+4. 运行时产物与源码分离
+   - config/、compose/、logs/、backups/、offline/、cache/ 等属于运行时产物
+   - lib/、bin/、install.sh 属于源码和脚本层
+
+5. 单向依赖
+   - 允许：入口 -> common -> service/common -> service/versions
+   - 允许：service/common -> same service/versions
+   - 允许：service -> common
+   - 禁止：service A -> service B
+   - 禁止：版本文件跨服务调用
+   - 禁止：common 层直接持有某个服务的业务逻辑
+
+6. 兼容过渡策略
+   - 先拆分，再逐步更新入口加载顺序
+   - 先保留旧文件作为兼容桥接层
+   - 再删除旧扁平结构
+   - 不做一次性全量重命名导致不可恢复的修改
+
+
+三、最终目录结构（目标结构）
+
+```text
+phpbox/
+├── install.sh
+├── bin/
+│   └── phpbox
+├── lib/
+│   ├── common/
+│   │   ├── env.sh
+│   │   ├── log.sh
+│   │   ├── paths.sh
+│   │   ├── ports.sh
+│   │   ├── docker.sh
+│   │   └── config.sh
+│   ├── php/
+│   │   ├── common/
+│   │   │   ├── install.sh
+│   │   │   ├── build.sh
+│   │   │   ├── extensions.sh
+│   │   │   └── config.sh
+│   │   ├── versions/
+│   │   │   ├── 7.4.sh
+│   │   │   ├── 8.0.sh
+│   │   │   └── 8.4.sh
+│   │   └── cli.sh
+│   ├── mysql/
+│   │   ├── common/
+│   │   │   ├── install.sh
+│   │   │   ├── port.sh
+│   │   │   └── config.sh
+│   │   ├── versions/
+│   │   │   ├── 5.7.sh
+│   │   │   ├── 8.0.sh
+│   │   │   └── 8.4.sh
+│   │   └── cli.sh
+│   ├── redis/
+│   │   ├── common/
+│   │   │   ├── install.sh
+│   │   │   ├── port.sh
+│   │   │   └── config.sh
+│   │   ├── versions/
+│   │   │   └── 8.sh
+│   │   └── cli.sh
+│   ├── nginx/
+│   │   ├── common/
+│   │   │   ├── install.sh
+│   │   │   ├── reload.sh
+│   │   │   └── config.sh
+│   │   ├── versions/
+│   │   │   ├── alpine.sh
+│   │   │   └── 1.25.sh
+│   │   └── cli.sh
+│   ├── site/
+│   │   ├── common/
+│   │   │   ├── add.sh
+│   │   │   ├── switch.sh
+│   │   │   └── list.sh
+│   │   └── cli.sh
+│   ├── go/
+│   │   ├── common/
+│   │   │   ├── install.sh
+│   │   │   ├── run.sh
+│   │   │   ├── shell.sh
+│   │   │   └── server.sh
+│   │   ├── versions/
+│   │   │   ├── alpine.sh
+│   │   │   └── 1.24.sh
+│   │   └── cli.sh
+│   ├── backup/
+│   │   ├── common/
+│   │   │   ├── backup.sh
+│   │   │   └── restore.sh
+│   │   └── cli.sh
+│   └── cli.sh
+├── compose/
+│   ├── docker-compose.yml
+│   └── services/
+│       ├── php-7.4.yml
+│       ├── php-8.0.yml
+│       ├── php-8.4.yml
+│       ├── mysql-5.7.yml
+│       ├── mysql-8.0.yml
+│       ├── mysql-8.4.yml
+│       ├── redis-8.yml
+│       └── nginx-default.yml
+├── config/
+│   ├── php/
+│   │   ├── 7.4/
+│   │   ├── 8.0/
+│   │   └── 8.4/
+│   ├── mysql/
+│   │   ├── 5.7/
+│   │   ├── 8.0/
+│   │   └── 8.4/
+│   ├── nginx/
+│   │   ├── alpine/
+│   │   └── sites/
+│   └── redis/
+│       └── 8/
+├── logs/
+│   ├── nginx/
+│   └── php/
+├── backups/
+├── cache/
+│   └── go/
+├── offline/
+│   └── php/
+│       ├── 7.4/
+│       ├── 8.0/
+│       └── 8.4/
+├── .env
+├── .env.example
+├── README.md
+├── AGENTS.md
+├── Subagent.md
+├── .gitignore
+└── state/
+```
+
+
+四、职责分层定义
+
+1. lib/common/
+   定义：全局公共底座
+   只存所有服务都共享的基础设施能力。
+   不允许放 PHP/MySQL/Nginx/Redis/Go 的业务逻辑。
+
+   例如：
+   - env.sh：读取和导出 .env
+   - log.sh：统一日志输出
+   - paths.sh：路径和目录定义
+   - ports.sh：端口检查与分配
+   - docker.sh：docker 预检、docker compose 通用调用
+   - config.sh：模板基础配置生成与持久化工具
+
+2. lib/php/common/
+   定义：PHP 线公共能力
+   只存 PHP 线自己的通用逻辑。
+   它不是全局公共层，而是 PHP 线的内部公共工具箱。
+
+   例如：
+   - install.sh：PHP 安装主流程
+   - build.sh：PHP 镜像构建与 Dockerfile 流程
+   - extensions.sh：扩展 add/remove/list 逻辑
+   - config.sh：PHP ini / extensions.env / compose 配置生成
+
+3. lib/php/versions/
+   定义：PHP 版本差异层
+   只存 7.4 / 8.0 / 8.4 等版本差异。
+
+   例如：
+   - 7.4.sh：7.4 特有兼容设置
+   - 8.0.sh：8.0 特有兼容设置
+   - 8.4.sh：8.4 特有兼容设置
+
+4. lib/mysql/common/
+   只放 MySQL 线公共逻辑。
+
+5. lib/mysql/versions/
+   只放 MySQL 版本差异。
+
+6. lib/nginx/common/
+   只放 Nginx 线公共逻辑。
+
+7. lib/nginx/versions/
+   只放 Nginx 版本差异。
+
+8. lib/redis/common/
+   只放 Redis 线公共逻辑。
+
+9. lib/go/common/
+   只放 Go 线公共逻辑。
+
+10. lib/site/
+    只放站点管理相关逻辑。
+
+11. lib/backup/
+    只放备份与恢复逻辑。
+
+12. compose/、config/、logs/、backups/、cache/、offline/
+    属于运行时产物和持久化数据目录，不算源码业务层。
+
+
+五、具体的命名规则
+
+1. 目录命名必须反映作用域
+   - lib/common/ = 全局公共
+   - lib/php/common/ = PHP 线公共
+   - lib/nginx/common/ = Nginx 线公共
+   - lib/php/versions/ = PHP 版本差异
+
+2. 文件命名必须反映职责
+   - install.sh：安装
+   - build.sh：构建
+   - reload.sh：重载
+   - config.sh：配置
+   - port.sh：端口
+   - extensions.sh：扩展
+   - server.sh：服务管理
+   - run.sh：运行
+
+3. 不允许出现以下模糊命名
+   - helper.sh
+   - misc.sh
+   - utils.sh
+   - main.sh
+   - shared.sh
+
+4. 不允许把版本独立复制成多套脚本目录
+   - 不允许出现：
+     php/7.4/install.sh
+     php/8.0/install.sh
+     php/8.4/install.sh
+   - 正确方式：
+     php/common/install.sh + php/versions/8.4.sh
+
+
+六、依赖方向和调用规则
+
+1. 入口脚本调用顺序必须固定
+   必须遵循：
+   入口 -> 全局 common -> 对应服务 common -> 对应服务 versions
+
+2. 服务之间不得互相乱调
+   例如：
+   - php 不能直接 source mysql
+   - mysql 不能直接 source php
+   - nginx 不能直接 source redis
+
+3. 允许的跨线联动必须是明确动作
+   允许但必须显示命名：
+   - php 安装成功后触发 nginx reload
+   - 站点绑定时读取 php 版本参数
+   - backup 恢复时调 common/config
+
+4. 全局 common 不允许依赖服务线逻辑
+   全局公共层只依赖自身和通用工具，不得反向依赖 PHP/MySQL/Nginx/Redis/Go 的业务模块。
+
+5. 服务线 common 不允许依赖其他业务线
+   只允许依赖全局 common 和同服务线其他文件。
+
+6. 版本差异文件只负责同一服务版本细节
+   不能跨版本调用其他服务。
+
+
+七、各服务的主线加载顺序模板
+
+1. PHP 线
+
+```bash
+source "$LIB_DIR/common/env.sh"
+source "$LIB_DIR/common/log.sh"
+source "$LIB_DIR/common/paths.sh"
+source "$LIB_DIR/common/ports.sh"
+source "$LIB_DIR/common/docker.sh"
+source "$LIB_DIR/common/config.sh"
+
+source "$LIB_DIR/php/common/install.sh"
+source "$LIB_DIR/php/common/build.sh"
+source "$LIB_DIR/php/common/extensions.sh"
+source "$LIB_DIR/php/common/config.sh"
+source "$LIB_DIR/php/versions/${PHP_VERSION}.sh"
+```
+
+2. MySQL 线
+
+```bash
+source "$LIB_DIR/common/env.sh"
+source "$LIB_DIR/common/log.sh"
+source "$LIB_DIR/common/paths.sh"
+source "$LIB_DIR/common/ports.sh"
+source "$LIB_DIR/common/docker.sh"
+source "$LIB_DIR/common/config.sh"
+
+source "$LIB_DIR/mysql/common/install.sh"
+source "$LIB_DIR/mysql/common/port.sh"
+source "$LIB_DIR/mysql/common/config.sh"
+source "$LIB_DIR/mysql/versions/${MYSQL_VERSION}.sh"
+```
+
+3. Nginx 线
+
+```bash
+source "$LIB_DIR/common/env.sh"
+source "$LIB_DIR/common/log.sh"
+source "$LIB_DIR/common/paths.sh"
+source "$LIB_DIR/common/ports.sh"
+source "$LIB_DIR/common/docker.sh"
+source "$LIB_DIR/common/config.sh"
+
+source "$LIB_DIR/nginx/common/install.sh"
+source "$LIB_DIR/nginx/common/config.sh"
+source "$LIB_DIR/nginx/common/reload.sh"
+source "$LIB_DIR/nginx/versions/${NGINX_VERSION}.sh"
+```
+
+4. Redis 线
+
+```bash
+source "$LIB_DIR/common/env.sh"
+source "$LIB_DIR/common/log.sh"
+source "$LIB_DIR/common/paths.sh"
+source "$LIB_DIR/common/ports.sh"
+source "$LIB_DIR/common/docker.sh"
+source "$LIB_DIR/common/config.sh"
+
+source "$LIB_DIR/redis/common/install.sh"
+source "$LIB_DIR/redis/common/port.sh"
+source "$LIB_DIR/redis/common/config.sh"
+source "$LIB_DIR/redis/versions/${REDIS_VERSION}.sh"
+```
+
+5. Go 线
+
+```bash
+source "$LIB_DIR/common/env.sh"
+source "$LIB_DIR/common/log.sh"
+source "$LIB_DIR/common/paths.sh"
+source "$LIB_DIR/common/ports.sh"
+source "$LIB_DIR/common/docker.sh"
+source "$LIB_DIR/common/config.sh"
+
+source "$LIB_DIR/go/common/install.sh"
+source "$LIB_DIR/go/common/run.sh"
+source "$LIB_DIR/go/common/shell.sh"
+source "$LIB_DIR/go/common/server.sh"
+source "$LIB_DIR/go/versions/${GO_VERSION}.sh"
+```
+
+
+八、重构实施步骤（最稳妥方案）
+
+第 1 步：定义边界
+- 明确哪些函数属于全局 common
+- 明确哪些属于 PHP common
+- 明确哪些属于版本差异
+- 明确哪些属于运行时产物
+
+第 2 步：创建新目录结构
+- 先新增 lib/common/
+- 再新增 lib/php/common/
+- 再新增 lib/mysql/common/
+- 再新增 lib/nginx/common/
+- 再新增 lib/redis/common/
+- 再新增 lib/go/common/
+- 再新增各版本目录 versions/
+
+第 3 步：搬运函数
+- 从旧的 lib/common.sh 中搬出全局通用函数
+- 从旧的 lib/php.sh 中搬出 PHP 线函数
+- 从旧的 lib/mysql.sh 中搬出 MySQL 线函数
+- 从旧的 lib/nginx.sh 中搬出 Nginx 线函数
+- 从旧的 lib/redis.sh 中搬出 Redis 线函数
+- 从旧的 lib/go.sh 中搬出 Go 线函数
+
+第 4 步：保留兼容层
+- 先不删除旧的扁平脚本
+- 让它们继续作为桥接，以确保脚本可运行
+- 逐步将入口切到新结构
+
+第 5 步：更新入口脚本
+- 修正 bin/phpbox 的 source 顺序
+- 更明确加载 common -> service/common -> service/versions
+
+第 6 步：清理旧结构
+- 删除不再使用的平铺脚本
+- 删除过时的重复逻辑
+- 保留必要兼容文件短时间内待观察
+
+第 7 步：验证
+- bash -n 检查脚本语法
+- 检查 source 顺序是否正确
+- 检查每个服务线都只依赖自己的目录
+- 检查版本差异文件只覆盖该服务线
+
+
+九、边界判断标准（最重要）
+
+如果一个函数无法一句话说明归属，就说明边界不清。
+
+明确判断标准：
+
+- 如果所有服务都要用，放到 lib/common/
+- 如果只在某个服务线中使用，放到该服务线目录下
+- 如果只是一个版本的差异，放到该服务线的 versions/
+- 如果是运行时生成物，放到 compose/、config/、logs/、backups/、offline/ 等目录
+
+不允许出现以下情况：
+- 全局 common 里出现 PHP build 逻辑
+- PHP 常用函数放进全局 common
+- 版本差异被散落在多个不同目录中
+- 业务线之间互相 source
+
+
+十、最终结论
+
+最终原则只有一句：
+
+“看目录名就知道它属于哪条线，看版本目录就知道哪个版本差异，看入口顺序就知道调用链。”
+
+这才是本次重构的最终落地目标。
+
+不能再回到“把一切都压进 common.sh”的状态。
+
+也不能再回到“所有脚本平铺在 lib 下但看不出归属”的状态。
+
+最终必须形成：
+
+- 全局公共层
+- 服务线公共层
+- 版本差异层
+- 运行时产物层
+
+四层清晰结构，具备可维持性、可阅读性和可扩展性。
+
+
+十一、实施要求（给后续 AI/开发者）
+
+后续任何 AI 或开发者在实现本次重构时，必须遵守以下必须项：
+
+1. 不在 lib/common/ 中放 PHP/MySQL/Nginx/Redis/Go 的业务逻辑。
+2. 不在 lib/php/ 等目录中放全局公共工具。
+3. 每个脚本必须有明确职责，在文件名和目录名中能看出来。
+4. 任何跨服务调用必须是显式动作，不能靠隐式文件加载顺序实现。
+5. 必须先做兼容层，再做清理层。
+6. 入口脚本必须按固定顺序加载：common -> service/common -> service/versions。
+7. 版本差异文件必须只覆盖同一服务线。
+8. 运行时目录必须和源码目录分开管理。
+9. 所有改动都需要保持对旧调用的兼容，避免一次性大改导致脚本失效。
+10. 每一步都要有清晰的可验证输出，不能靠猜测运行是否正确。
+
+
+十二、最终一句话版本
+
+本次改造的目标，是把 phpbox 从“平铺混合脚本结构”重构成“分层归属结构”：
+
+- lib/common：全局通用工具
+- lib/php/common：PHP 专属公共能力
+- lib/php/versions：PHP 版本差异
+- 其余服务线同理
+- 运行时目录单独分离
+- 调用顺序固定且可读
+- 版本不复制整套脚本，而是按差异文件覆盖
+
+这才是本次重构的最终落地方案。
