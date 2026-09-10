@@ -55,20 +55,41 @@ _php_pecl_tarball_url() {
 # 宿主代理下载并暂存。暂存 ≠ 入库：包是否可用要等构建验证（见 _php_promote_pecl_tarballs），
 # 备份库里因此只会有验证成功的包。手动放入官网 tgz（按"扩展-版本.tgz"命名到对应版本目录）
 # 视为用户自证可用，直接命中
+# 备份优先：命中即零网络（与 APK 侧 _php_stage_apk_closure 的契约对齐——此前 PECL 侧
+# 是"先下载后查备份"，offline 库全命中仍要重新下载全部 tgz，真离线环境直接构建失败）。
+# 备份里的版本是"该 PHP 版本上验证过"的包，即便不是最新版也按缓存语义复用（与 APK 侧一致）。
+# 备份键两种形态都认：精确名 "$ext.tgz"（旧式无跳转命名，如现存的 redis.tgz）优先，
+# 再按 "$ext-*.tgz" glob 匹配任意已验证版本（如 7.4 钉住的 imagick-3.7.0.tgz）。
 _php_stage_pecl_tarballs() {
   local ver=$1 remote_list=$2 build_dir=$3
   local dest="$build_dir/pecl"
   local backup_dir="$OFFLINE_DIR/php/$ver/pecl"
   mkdir -p "$dest"
   log "pecl 备份库: $backup_dir → 构建目录: $dest"
-  local proxy="${BUILD_PROXY:-auto}"
-  if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
-  local curl_args=()
-  if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then curl_args+=(-x "$proxy"); fi
 
   _PECL_STAGED=""
-  local ext url fname tmp
+  local ext url fname tmp hit
+  local proxy_resolved=false curl_args=()
   for ext in $remote_list; do
+    hit=""
+    for cand in "$backup_dir/$ext.tgz" "$backup_dir/$ext-"*.tgz; do
+      [ -f "$cand" ] || continue   # glob 无匹配时保持字面串，靠 -f 过滤掉
+      hit=$(basename "$cand")
+      break
+    done
+    if [ -n "$hit" ]; then
+      log "pecl 备份命中: $backup_dir/$hit → $dest/（零网络）"
+      cp "$backup_dir/$hit" "$dest/$hit"
+      continue
+    fi
+
+    # 未命中才触网；代理解析也推迟到首次真要下载时——全命中时连本地代理探测都不做
+    if ! $proxy_resolved; then
+      local proxy="${BUILD_PROXY:-auto}"
+      if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
+      if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then curl_args+=(-x "$proxy"); fi
+      proxy_resolved=true
+    fi
     url=$(_php_pecl_tarball_url "$ext" "$ver")
     tmp=$(mktemp)
     # -L 跟随 /get/<ext> 的版本跳转，url_effective 即最终带版本号的 URL，取其文件名做备份键
@@ -81,15 +102,9 @@ _php_stage_pecl_tarballs() {
     fname=$(basename "$(cat "$tmp.url")")
     rm -f "$tmp.url"
     [[ "$fname" == *.tgz ]] || fname="$ext.tgz"   # 无跳转时拿不到版本号，退回旧命名
-    if [ -f "$backup_dir/$fname" ]; then
-      log "pecl 备份命中: $backup_dir/$fname → $dest/"
-      rm -f "$tmp"
-      cp "$backup_dir/$fname" "$dest/$fname"
-    else
-      mv "$tmp" "$dest/$fname"
-      log "pecl 已下载暂存: $dest/$fname（源: $url，构建成功后晋升备份库）"
-      _PECL_STAGED="$_PECL_STAGED $fname"
-    fi
+    mv "$tmp" "$dest/$fname"
+    log "pecl 已下载暂存: $dest/$fname（源: $url，构建成功后晋升备份库）"
+    _PECL_STAGED="$_PECL_STAGED $fname"
   done
   _PECL_STAGED="${_PECL_STAGED# }"
 }
