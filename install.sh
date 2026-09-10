@@ -25,14 +25,14 @@ networks:
     name: ${NETWORK_NAME:-phpboxnet}
 EOF
 
-echo ">>> 创建符号链接（需要 sudo 权限）..."
+echo ">>> 安装全局 phpbox 命令（强制覆盖旧版本）..."
 if ! sudo -n true 2>/dev/null; then
     echo "警告：sudo 不可用或需要密码，请手动执行："
-    echo "  sudo ln -sf \"$HOME/phpbox/bin/phpbox\" /usr/local/bin/phpbox"
+    echo "  sudo install -m 0755 \"$HOME/phpbox/bin/phpbox\" /usr/local/bin/phpbox"
 else
     if [ -d /usr/local/bin ]; then
-        sudo ln -sf "$HOME/phpbox/bin/phpbox" /usr/local/bin/phpbox
-        echo "符号链接已创建：/usr/local/bin/phpbox -> $HOME/phpbox/bin/phpbox"
+        sudo install -m 0755 "$HOME/phpbox/bin/phpbox" /usr/local/bin/phpbox
+        echo "全局命令已覆盖更新：/usr/local/bin/phpbox"
     else
         echo "错误：/usr/local/bin 不存在，请手动将 phpbox 添加到 PATH"
     fi
