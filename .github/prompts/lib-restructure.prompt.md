@@ -41,6 +41,56 @@ argument-hint: "Step number 0-7, or 'verify' to run all gates only"
 | 6 | 观察期后删旧平铺脚本与重复逻辑 | 待办 |
 | 7 | 全面验证 + 同步 AGENTS.md/README/.github 指令中的 lib 路径引用 | 待办 |
 
-## 附录 A：函数归属清单（第 1 步产出）
+## 附录 A：函数归属清单（第 1 步产出，137 个函数全覆盖）
 
-见后续提交填充；搬运切片以本清单为核对依据，清单与实际不一致时以闸门结果为准并回写清单。
+以 `tests/functions.baseline` 为核对底册；【拆】标记 = 纯搬运后需独立重构切片（回调化/提取版本差异），绝不与搬运混在同一提交。
+
+### lib/common/（全局公共，36 个）
+
+| 目标文件 | 函数 | 说明 |
+|---|---|---|
+| log.sh | log, success, error, confirm_yes | 终端输出与交互 |
+| env.sh | _env_strip_quotes, _env_read_file, load_env, read_env_value, _load_apk_mirrors | .env 读取侧与镜像源列表归一化 |
+| paths.sh | get_service_key, get_container_name, get_volume_name, validate_version | 命名/键名派生与版本号校验 |
+| ports.sh | port_key, check_port, show_port_owner, check_and_report_port, find_free_port, get_or_set_port | 端口检查与分配 |
+| docker.sh | require_docker, stop_and_remove_container, run_compose, http_probe_ok, _rm_rf_with_docker_fallback | Docker 预检与 Compose 通用调用 |
+| config.sh | sed_i, escape_sed, env_set, env_unset | 配置持久化工具（.env 写入侧） |
+| install.sh | get_or_set_password, _install_rollback_begin, _install_rollback_commit, _install_rollback_run, init_config_files, _generic_service_install, _generic_db_port_set, verify_service | 安装事务与回滚框架【拆：8 个内的服务 case 分发回调化】 |
+
+### lib/cli.sh（2 个）：show_help（自 bin/phpbox 迁入）, cmd_list
+
+### lib/php/（33 个）
+
+| 目标文件 | 函数 | 说明 |
+|---|---|---|
+| common/install.sh | _php_install, _php_ensure_running, _php_show_list, _php_uninstall, _php_cleanup_images | 生命周期 |
+| common/build.sh | build.sh 全部 17 个 + _apk_mirror_host_args, _apk_ranked_fetch_run | 镜像构建 + APK 下载器（仅 PHP 线使用，自 common.sh 迁入） |
+| common/extensions.sh | _php_get_extensions_file, _php_read_extensions, _php_write_extensions, _php_validate_extensions, _php_infer_installed_version, _php_extension_op | 扩展状态与操作 |
+| common/config.sh | _php_generate_compose, _init_php_config | _init_php_config 自 nginx.sh 迁入（修正既有错位） |
+| cli.sh | cmd_php | 子命令分发 |
+| versions/7.4.sh | 【拆】imagick 3.7.0 / xdebug 3.1.6 旧版钉住（自 _php_pecl_tarball_url 提取） | versions/8.0.sh、8.4.sh 当前为空占位 |
+
+### lib/mysql/（10 个）：install.sh（_mysql_clean_stale_sock, _mysql_ensure_running, _mysql_install, _mysql_show_list, _mysql_purge, _mysql_uninstall）、port.sh（_mysql_port_set）、config.sh（_mysql_generate_compose, _init_mysql_config【拆：8.4 认证差异 → versions/8.4.sh】）、cli.sh（cmd_mysql）；versions/{5.7,8.0}.sh 空占位
+
+### lib/redis/（9 个）：install.sh（_redis_ensure_running, _redis_install, _redis_show_list, _redis_purge, _redis_uninstall）、port.sh（_redis_port_set）、config.sh（_redis_generate_compose, _init_redis_config）、cli.sh（cmd_redis）；versions/8.sh 空占位
+
+### lib/nginx/（12 个）：install.sh（_nginx_ensure_running, _nginx_remove, _nginx_install, _nginx_port_set）、reload.sh（nginx_try_reload, _nginx_reload）、config.sh（_nginx_inject_sites_include, _init_nginx_config, _nginx_effective_version, _nginx_validate, _nginx_generate_compose）、cli.sh（cmd_nginx）；versions/{alpine,1.25}.sh 空占位
+
+### lib/site/（12 个）：add.sh（_valid_domain, _site_rollback, _site_atomic_replace, _site_add, _site_remove）、switch.sh（_site_switch）、list.sh（_site_show_list）、hosts.sh（cmd_hosts, _hosts_add, _hosts_remove, _hosts_list）、cli.sh（cmd_site）
+
+### lib/go/（15 个）：install.sh（_go_install, _go_uninstall）、run.sh（_go_prepare, _go_exec——run/test/shell/logs/stop/env 六个子命令经此分发）、shell.sh（占位，shell 由 _go_exec 分发，拆分后迁入）、server.sh（_go_server, _go_list, _go_proxy_nginx, _go_resolve_project, _go_resolve_version, _go_resolve_existing, _go_project_env_value, _go_validate_project_name, _go_generate_compose, _go_ensure_running）、cli.sh（cmd_go）；versions/{alpine,1.24}.sh 空占位
+
+### lib/backup/（8 个）：common/backup.sh（_get_abs_path, _phpbox_stop_svc, _phpbox_start_stopped）、common/restore.sh（_restore_list_vol_files, _restore_collect_invalid_paths, _restore_volumes）、cli.sh（cmd_backup, cmd_restore——顶层命令实现）
+
+### 跨线显式动作（§六.3 允许项，搬运时保留直调，cli.sh 全量加载保证函数在场）
+
+- php/common/install.sh:53 → nginx_try_reload（PHP 起容器后刷新 upstream）
+- site/common/add.sh:47,54,266 → _nginx_validate（改站点前先验 Nginx 配置）
+
+### 树缺口判断记录（目标树未枚举、按命名规则补齐）
+
+1. lib/common/install.sh：安装事务/回滚框架是全服务共享的基础设施，§四.1 六文件为"例如"式列举，按职责命名补此文件。
+2. lib/site/common/hosts.sh：hosts 增删查现属 site 线，目标树未列，按职责命名补齐。
+3. _site_remove 归 add.sh（站点变更生命周期）；_nginx_port_set 归 install.sh（目标树 nginx 线无 port.sh）。
+4. backup/cli.sh 承接 cmd_backup/cmd_restore 两个顶层命令实现。
+
