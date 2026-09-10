@@ -17,10 +17,13 @@ current_file=$(mktemp)
   sed -E 's/[[:space:]]*\(\)$//' | LC_ALL=C sort -u > "$current_file"
 current=$(cat "$current_file")
 
-# 基线缺失 = 搬运丢函数
-missing=$(comm -23 "$current_file" <(LC_ALL=C sort tests/functions.baseline) | head -20)
-[ -z "$missing" ] || { rm -f "$current_file"; fail "以下函数不在基线中（若为真实新增，请按脚本头注释更新基线）:
+# 双向核对：基线有而代码丢 = 搬运丢函数（更危险，曾真实发生）；代码有而基线无 = 未登记的新增
+missing=$(comm -13 "$current_file" <(LC_ALL=C sort tests/functions.baseline) | head -20)
+[ -z "$missing" ] || { rm -f "$current_file"; fail "以下函数已丢失（搬运遗漏或误删，请对照 .github/prompts/lib-restructure.prompt.md 附录 A 找回）:
 $missing"; }
+added=$(comm -23 "$current_file" <(LC_ALL=C sort tests/functions.baseline) | head -20)
+[ -z "$added" ] || { rm -f "$current_file"; fail "以下函数不在基线中（若为真实新增，请按脚本头注释更新基线并在提交说明写明）:
+$added"; }
 
 # 重复定义 = 兼容桥期间最危险的隐患：同名函数静默覆盖，调用到旧实现
 dupes=$(uniq -d < "$current_file")
