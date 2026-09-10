@@ -252,7 +252,7 @@ bin/phpbox（薄入口：加载链 + 转调）
 
 - `bin/phpbox` 只负责 bash 守护、固定顺序加载和转调 `lib/cli.sh`，不实现业务规则；命令路由、Docker 预检分发和帮助文本在 `lib/cli.sh`。
 - `lib/common/` 六件套只提供环境、日志、路径、端口、Docker 调用和配置持久化基础设施；`lib/common/install.sh` 提供安装事务与回滚框架。全局公共层不得持续吸收具体服务的业务逻辑。
-- `lib/php/common/build.sh` 负责 PHP 构建编排（含 APK 下载器与离线闭包晋升）；网络下载、APK/PECL 资产准备、Dockerfile 渲染、镜像构建和缓存晋升应保持可分辨的函数边界。
+- `lib/php/common/build.sh` 负责 PHP 构建编排与 Dockerfile 渲染；`lib/php/common/offline.sh` 负责 APK/PECL 离线资产事务（暂存、闭包校验、晋升、丢弃）；`lib/php/common/apk-fetch.sh` 负责 APK 容器下载器。三者应保持可分辨的函数边界，下载、校验、晋升、清理和回滚不得堆叠回同一函数。
 - `lib/php/`、`lib/mysql/`、`lib/redis/`、`lib/nginx/`、`lib/site/`、`lib/go/`、`lib/backup/` 各线只负责各自领域；不得反向调用 CLI 入口，不得依赖其他业务线的私有函数，也不得在全局 common 存放本线业务。
 - 跨模块调用必须通过公共函数或明确的回调契约；不得依赖文件加载顺序提供隐式函数。
 - 生成配置必须先写临时文件并校验，成功后原子替换正式文件；运行期生成物不得被当作源码维护。

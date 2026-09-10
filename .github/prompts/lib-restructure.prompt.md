@@ -64,7 +64,7 @@ argument-hint: "Step number 0-7, or 'verify' to run all gates only"
 | 目标文件 | 函数 | 说明 |
 |---|---|---|
 | common/install.sh | _php_install, _php_ensure_running, _php_show_list, _php_uninstall, _php_cleanup_images | 生命周期 |
-| common/build.sh | build.sh 全部 17 个 + _apk_mirror_host_args, _apk_ranked_fetch_run | 镜像构建 + APK 下载器（仅 PHP 线使用，自 common.sh 迁入） |
+| common/build.sh | build.sh 全部 17 个 + _apk_mirror_host_args, _apk_ranked_fetch_run | 镜像构建 + APK 下载器（仅 PHP 线使用，自 common.sh 迁入）。优化切片 A 后按职责拆为三文件：apk-fetch.sh（下载器）、offline.sh（离线资产事务）、build.sh（编排渲染），桥 lib/build.sh 三路转发 |
 | common/extensions.sh | _php_get_extensions_file, _php_read_extensions, _php_write_extensions, _php_validate_extensions, _php_infer_installed_version, _php_extension_op | 扩展状态与操作 |
 | common/config.sh | _php_generate_compose, _init_php_config | _init_php_config 自 nginx.sh 迁入（修正既有错位） |
 | cli.sh | cmd_php | 子命令分发 |

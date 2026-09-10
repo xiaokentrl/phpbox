@@ -30,6 +30,8 @@ source "$LIB_DIR/common/install.sh"
 
 source "$LIB_DIR/php/common/install.sh"
 source "$LIB_DIR/php/common/extensions.sh"
+source "$LIB_DIR/php/common/apk-fetch.sh"
+source "$LIB_DIR/php/common/offline.sh"
 source "$LIB_DIR/php/common/build.sh"
 source "$LIB_DIR/php/common/config.sh"
 source "$LIB_DIR/mysql/common/install.sh"

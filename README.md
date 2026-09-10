@@ -261,7 +261,7 @@ $HOME/phpbox/
 ├── lib/                          # 四层分层结构（详见 AGENTS.md §3）
 │   ├── common/                   # 全局公共层：env/log/paths/ports/docker/config 六件套 + install 事务框架
 │   ├── cli.sh                    # 命令路由实现与全局命令（help/list）
-│   ├── php/                       # PHP 线：common/{install,build,extensions,config} + versions/ + cli.sh
+│   ├── php/                       # PHP 线：common/{install,extensions,apk-fetch,offline,build,config} + versions/ + cli.sh
 │   ├── mysql/                     # MySQL 线：common/{install,port,config} + versions/ + cli.sh
 │   ├── redis/                     # Redis 线：common/{install,port,config} + versions/ + cli.sh
 │   ├── nginx/                     # Nginx 线：common/{install,reload,config} + versions/ + cli.sh

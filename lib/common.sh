@@ -3,7 +3,7 @@
 
 # 兼容桥接层（迁移第 3/4 步）：原 lib/common.sh 全部函数与常量已迁至
 # lib/common/ 六件套 + lib/common/install.sh（安装事务框架）；
-# APK 下载器公共层随 PHP 构建线迁至 lib/php/common/build.sh。
+# APK 下载器公共层随 PHP 构建线迁至 lib/php/common/{apk-fetch.sh,offline.sh}。
 # 本文件仅保留 source 转发以维持旧加载链可用；新加载链稳定后（第 6 步）整文件删除。
 # 加载序即需求文档 §七 的全局公共顺序：env → log → paths → ports → docker → config（→ install 事务框架）
 source "$(dirname "${BASH_SOURCE[0]}")/common/env.sh"

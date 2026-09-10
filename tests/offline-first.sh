@@ -14,7 +14,9 @@ ok()  { echo "PASS: $*"; pass=$((pass+1)); }
 bad() { echo "FAIL: $*" >&2; fail=$((fail+1)); }
 
 source lib/common/log.sh          # log/error：被测函数的依赖
-source lib/php/common/build.sh    # 仅加载函数定义，不执行任何动作
+source lib/php/common/apk-fetch.sh   # 与真实加载链同序（downloader → offline）
+source lib/php/common/offline.sh  # 被测层：PECL 暂存/晋升 + 代理解析（优化切片 A 拆分后所在）
+source lib/php/common/build.sh    # 编排层也一并加载，保持与 bin/phpbox 装载形态一致
 
 box=$(mktemp -d)
 trap 'rm -rf "$box"' EXIT
