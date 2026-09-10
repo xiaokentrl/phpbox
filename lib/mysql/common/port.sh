@@ -1,2 +1,14 @@
-# MySQL 端口修改事务
-# 结构迁移第 2 步占位：本文件暂无函数体，搬运归属见 .github/prompts/lib-restructure.prompt.md 附录 A
+#!/bin/bash
+# shellcheck shell=bash
+# MySQL 端口修改事务（搬运自 lib/mysql.sh，纯迁移无逻辑改动）
+
+_mysql_port_set() {
+  local sub="${1:-}"
+  local ver="${2:-}"
+  local new_port="${3:-}"
+  [ "$sub" != "set" ] && error "用法: phpbox mysql port set <版本> <新端口>"
+  [ -z "$ver" ] && error "请指定版本"
+  [ -z "$new_port" ] && error "请指定新端口"
+  validate_version "$ver"
+  _generic_db_port_set "mysql" "$ver" "$new_port" "3306"
+}
