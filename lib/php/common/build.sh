@@ -85,9 +85,8 @@ _php_stage_pecl_tarballs() {
 
     # 未命中才触网；代理解析也推迟到首次真要下载时——全命中时连本地代理探测都不做
     if ! $proxy_resolved; then
-      local proxy="${BUILD_PROXY:-auto}"
-      if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
-      if [ -n "$proxy" ] && [ "$proxy" != "none" ]; then curl_args+=(-x "$proxy"); fi
+      local proxy=$(_php_resolve_build_proxy_base)
+      if [ "$proxy" != "none" ]; then curl_args+=(-x "$proxy"); fi
       proxy_resolved=true
     fi
     url=$(_php_pecl_tarball_url "$ext" "$ver")
@@ -289,7 +288,7 @@ _php_promote_apk_closure() {
 # 全部扩展的依赖一次性装进独立 RUN 层并缓存：失败重试/重建不再重复下载数百 MiB；
 # 映射未覆盖的依赖由 IPE 按名自行安装（网络路径照旧），此处缺失只会变慢不会失败
 _PHP_BUILD_BASE_APK_DEPS="musl-dev linux-headers pkgconf re2c"
-_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev,libwebp-dev,zlib-dev,zlib-dev,libxpm-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
+_PHP_EXT_APK_DEPS="gd:libpng-dev,libjpeg-turbo-dev,freetype-dev,libwebp-dev,zlib-dev,libxpm-dev intl:icu-dev zip:libzip-dev pgsql:libpq-dev pdo_pgsql:libpq-dev soap:libxml2-dev imagick:imagemagick-dev"
 
 _php_ext_apk_deps() {
   local names=${1//,/ } ext pair out="$_PHP_BUILD_BASE_APK_DEPS"
@@ -353,15 +352,27 @@ RUN usermod -u \${UID} www-data && groupmod -g \${GID} www-data
 DEOF
 }
 
+# BUILD_PROXY 取值解析的公共前段（两处调用方共用，原先各写一份 auto→探测 分支）：
+# auto → 本地探测；none/空 → "none"；其余原样输出（host:port 或完整 URL）。
+# 宿主侧调用方（pecl 预下载）直接拿值用——显式配置的 127.0.0.1:port 对宿主 curl
+# 本就可达，不能做 docker0 改写；容器侧调用方（_php_resolve_build_proxy）在此
+# 基础上再补 http:// 归一化与网关 IP 改写
+_php_resolve_build_proxy_base() {
+  local proxy="${BUILD_PROXY:-auto}"
+  if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
+  if [ -z "$proxy" ] || [ "$proxy" = "none" ]; then echo "none"; return 0; fi
+  echo "$proxy"
+}
+
 # 解析 BUILD_PROXY 为容器可达的最终代理地址，stdout 输出（none 或 http://URL）。
 # none=禁用；auto（默认）=探测本地常见代理端口；其余按显式值（host:port 或完整 URL）。
 # 代理地址归一化：原生 docker 的构建容器里 host.docker.internal 默认不解析（Desktop VM
 # 才内置该域名），换引擎后 pecl 全部死于 DNS——代理指向本机时改写为 docker0 网关 IP
 # （容器内零 DNS 可达），取不到再退回域名，并由调用方的 --add-host host-gateway 兜底
 _php_resolve_build_proxy() {
-  local proxy="${BUILD_PROXY:-auto}"
-  if [ "$proxy" = "auto" ]; then proxy=$(_php_detect_build_proxy); fi
-  if [ -z "$proxy" ] || [ "$proxy" = "none" ]; then echo "none"; return 0; fi
+  local proxy
+  proxy=$(_php_resolve_build_proxy_base)
+  if [ "$proxy" = "none" ]; then echo "none"; return 0; fi
   case "$proxy" in
     http://*|https://*) : ;;
     *) proxy="http://${proxy}" ;;

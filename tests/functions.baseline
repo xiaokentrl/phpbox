@@ -69,6 +69,7 @@ _php_promote_pecl_tarballs
 _php_read_extensions
 _php_render_dockerfile
 _php_resolve_build_proxy
+_php_resolve_build_proxy_base
 _php_show_list
 _php_split_ext_list
 _php_stage_apk_closure
