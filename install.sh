@@ -26,16 +26,17 @@ networks:
 EOF
 
 echo ">>> 安装全局 phpbox 命令（强制覆盖旧版本）..."
-if ! sudo -n true 2>/dev/null; then
-    echo "警告：sudo 不可用或需要密码，请手动执行："
-    echo "  sudo install -m 0755 \"$HOME/phpbox/bin/phpbox\" /usr/local/bin/phpbox"
-else
-    if [ -d /usr/local/bin ]; then
-        sudo install -m 0755 "$HOME/phpbox/bin/phpbox" /usr/local/bin/phpbox
-        echo "全局命令已覆盖更新：/usr/local/bin/phpbox"
+if [ -d /usr/local/bin ]; then
+    # 直接尝试：sudo 需要密码时会在此刻提示输入。不用 sudo -n 预检——密码缓存
+    # 过期时它会静默跳过安装，导致全局命令时有时无
+    if sudo ln -sf "$HOME/phpbox/bin/phpbox" /usr/local/bin/phpbox; then
+        echo "符号链接已创建：/usr/local/bin/phpbox -> $HOME/phpbox/bin/phpbox"
     else
-        echo "错误：/usr/local/bin 不存在，请手动将 phpbox 添加到 PATH"
+        echo "警告：创建失败，请手动执行："
+        echo "  sudo ln -sf \"$HOME/phpbox/bin/phpbox\" /usr/local/bin/phpbox"
     fi
+else
+    echo "错误：/usr/local/bin 不存在，请手动将 phpbox 添加到 PATH"
 fi
 
 echo ">>> 生成默认 .env（如不存在）..."
