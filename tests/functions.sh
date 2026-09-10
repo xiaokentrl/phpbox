@@ -1,0 +1,31 @@
+#!/bin/bash
+# 函数清单断言：lib/（含子目录，迁移后形态）+ bin/phpbox 中定义的函数全集必须与
+# tests/functions.baseline 完全一致。这是结构迁移"搬运不丢函数"的核对闸门——
+# 纯搬运切片前后此脚本必须绿；新增/删除真实函数时先改基线再动代码，并在提交说明里写明。
+# 基线由脚本生成（勿手写）：
+#   { find lib -name '*.sh' -type f | sort; echo bin/phpbox; } | xargs grep -hoE \
+#     '^[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*\(\)' | sed -E 's/[[:space:]]*\(\)$//' | sort -u
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# 收集当前函数定义（迁移期间 lib/*.sh 与 lib/**/*.sh 并存，统一纳入）
+current_file=$(mktemp)
+{ find lib -name '*.sh' -type f | sort; echo bin/phpbox; } |
+  xargs grep -hoE '^[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*\(\)' |
+  sed -E 's/[[:space:]]*\(\)$//' | LC_ALL=C sort -u > "$current_file"
+current=$(cat "$current_file")
+
+# 基线缺失 = 搬运丢函数
+missing=$(comm -23 "$current_file" <(LC_ALL=C sort tests/functions.baseline) | head -20)
+[ -z "$missing" ] || { rm -f "$current_file"; fail "以下函数不在基线中（若为真实新增，请按脚本头注释更新基线）:
+$missing"; }
+
+# 重复定义 = 兼容桥期间最危险的隐患：同名函数静默覆盖，调用到旧实现
+dupes=$(uniq -d < "$current_file")
+rm -f "$current_file"
+[ -z "$dupes" ] || fail "重复定义的函数（新旧结构同名共存，先删旧再切新）:
+$dupes"
+
+echo "OK: 函数清单与基线一致（$(echo "$current" | wc -l) 个函数）"
