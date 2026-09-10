@@ -257,17 +257,17 @@ phpbox go uninstall 1.24 --purge   # 同时删除 cache/go/1.24
 
 ```
 $HOME/phpbox/
-├── bin/phpbox                    # 主入口脚本（用户调用）
-├── lib/
-│   ├── common.sh                 # 公共函数：日志、环境加载、端口检查、Docker 预检、回滚框架等
-│   ├── build.sh                  # PHP 镜像构建：apk/pecl 离线缓存、Dockerfile 渲染、构建验证
-│   ├── php.sh                    # PHP 命令实现：install/extension/list/uninstall
-│   ├── mysql.sh                  # MySQL 管理（未提供完整，但接口由主入口调用）
-│   ├── redis.sh                  # Redis 管理
-│   ├── nginx.sh                  # Nginx 管理
-│   ├── site.sh                   # 站点管理
-│   ├── go.sh                      # Go 镜像、项目发现和容器管理
-│   └── backup.sh                  # 备份与恢复
+├── bin/phpbox                    # 薄入口：加载 lib/ 固定加载链后转调 lib/cli.sh
+├── lib/                          # 四层分层结构（详见 AGENTS.md §3）
+│   ├── common/                   # 全局公共层：env/log/paths/ports/docker/config 六件套 + install 事务框架
+│   ├── cli.sh                    # 命令路由实现与全局命令（help/list）
+│   ├── php/                       # PHP 线：common/{install,build,extensions,config} + versions/ + cli.sh
+│   ├── mysql/                     # MySQL 线：common/{install,port,config} + versions/ + cli.sh
+│   ├── redis/                     # Redis 线：common/{install,port,config} + versions/ + cli.sh
+│   ├── nginx/                     # Nginx 线：common/{install,reload,config} + versions/ + cli.sh
+│   ├── site/                      # 站点与 hosts：common/{add,switch,list,hosts} + cli.sh
+│   ├── go/                        # Go 线：common/{install,run,shell,server} + versions/ + cli.sh
+│   └── backup/                    # 备份与恢复：common/{backup,restore} + cli.sh
 ├── compose/
 │   ├── docker-compose.yml        # 主 compose（仅定义共享网络）
 │   └── services/                 # 每个服务版本一个 yml 分片（如 php-8.4.yml）
@@ -280,7 +280,7 @@ $HOME/phpbox/
 
 ### 仓库里有什么
 
-仓库**只跟踪源码与模板**：`bin/phpbox`、`lib/*.sh`、`install.sh`、`tests/*.sh`、`.env.example`、`README.md`、`.gitignore`，以及保证空目录存在的几个 `.gitkeep`。
+仓库**只跟踪源码与模板**：`bin/phpbox`、`lib/`（分层目录全量，迁移过渡期含 `lib/*.sh` 兼容桥）、`install.sh`、`tests/`、`.env.example`、`README.md`、`.gitignore`，以及保证空目录存在的几个 `.gitkeep`。
 
 其它一切都是运行期生成物，已列入 `.gitignore`，不会入仓：
 

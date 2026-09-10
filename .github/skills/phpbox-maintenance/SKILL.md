@@ -54,7 +54,7 @@ disable-model-invocation: false
 ## 验证清单
 
 ```bash
-bash -n install.sh bin/phpbox lib/*.sh
+bash tests/lint.sh   # 覆盖 install.sh/bin/phpbox/lib 全部新旧形态
 bash tests/lint.sh
 bash tests/run.sh
 ```

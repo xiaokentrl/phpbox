@@ -40,21 +40,21 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
   go env <项目>                              查看 Go 容器环境
 
   nginx install [--port 端口]                安装 Nginx (固定使用 nginx:alpine)
-  nginx port set <新端口]                     修改 Nginx 端口
+  nginx port set <新端口>                     修改 Nginx 端口
   nginx reload                               重载配置
   nginx uninstall                            卸载 Nginx（保留配置）
 
   site add <域名> --php <版本>                创建站点
-  site switch <域名> --php <版本>            切换站点的 PHP 版本
+  site switch <域名> --php <版本>             切换站点的 PHP 版本
   site list                                  列出所有站点
-  site remove <域名>                          删除站点
+  site remove <域名>                         删除站点
 
   hosts add <域名>                           添加 hosts 解析
-  hosts remove <域名>                         移除 hosts 解析
+  hosts remove <域名>                        移除 hosts 解析
   hosts list                                 查看 hosts 状态
 
   backup                                     备份所有数据
-  restore <备份文件> [-y]                    恢复数据（-y 非交互确认）
+  restore <备份文件> [-y]                   恢复数据（-y 非交互确认）
 
   list                                       列出所有已安装服务
 

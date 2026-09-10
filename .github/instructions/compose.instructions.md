@@ -1,6 +1,6 @@
 ---
 description: "Docker Compose instructions for phpbox generated services, health checks, ports, volumes, and rollback."
-applyTo: "compose/**/*.yml,compose/**/*.yaml,lib/*.sh,config/**/*.conf"
+applyTo: "compose/**/*.yml,compose/**/*.yaml,lib/**/*.sh,config/**/*.conf"
 ---
 
 # phpbox Compose 规则

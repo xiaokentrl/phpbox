@@ -125,7 +125,7 @@ config/php/
 - Go 项目不由 phpbox 创建；`GO_PROJECTS_ROOT` 的直接子目录中存在 `go.mod` 即自动发现，目录名作为项目名。
 - 全局 `.env` 提供 `GO_DEFAULT_VERSION`、`GO_DEFAULT_PORT`、`GO_PROXY`、`GO_CACHE_ROOT` 和 `GO_CGO_ENABLED`；项目根目录 `.env` 只覆盖 `GO_VERSION`、`GO_PORT` 和 `GO_CGO_ENABLED`。
 - `phpbox go install` 只拉取并记录 Go 镜像默认版本；不创建没有源码挂载的空容器。项目容器由 `go run/test/shell` 按项目生成。
-- `GO_DEFAULT_VERSION=alpine` 表示 `golang:alpine` 最新稳定镜像；数字版本 `1.24` 映射为 `golang:1.24-alpine`。版本归一化只能由 `lib/go.sh` 的公共函数实现。
+- `GO_DEFAULT_VERSION=alpine` 表示 `golang:alpine` 最新稳定镜像；数字版本 `1.24` 映射为 `golang:1.24-alpine`。版本归一化只能由 `lib/go/common/server.sh` 的公共函数实现。
 - Go 容器内路径固定为 `/workspace`、`GOROOT=/usr/local/go`、`GOPATH=/go`；宿主机缓存为 `GO_CACHE_ROOT/<版本>/`。
 - `phpbox go list` 只负责列出 Go 镜像和 Go 容器；`phpbox go server` 负责列出自动发现的项目及状态，避免两个命令职责混淆。
 - Go 项目不发布独立宿主机端口；Nginx 已运行时，按 `<项目名>.test -> go-<项目名>:GO_PORT` 生成代理，hosts 修改仍需用户显式执行。
@@ -134,19 +134,28 @@ config/php/
 
 ## 3. 目录和架构
 
+四层分层结构（权威定义见《新改造需求.txt》，执行与裁决记录见 `.github/prompts/lib-restructure.prompt.md`）：
+
 ```text
 phpbox/
-├── bin/phpbox                    # CLI 入口和命令路由
+├── bin/phpbox                    # 薄入口：bash 守护 + 固定加载链 + 转调 lib/cli.sh
 ├── lib/
-│   ├── common.sh                 # 环境、日志、预检、路径、回滚基础设施
-│   ├── build.sh                  # PHP Dockerfile、APK/PECL 和镜像构建
-│   ├── php.sh                    # PHP 安装、扩展、列表和卸载
-│   ├── mysql.sh                  # MySQL 生命周期和端口
-│   ├── redis.sh                  # Redis 生命周期和端口
-│   ├── nginx.sh                  # Nginx 生命周期、配置和重载
-│   ├── site.sh                   # 站点、vhost、PHP 版本切换
-│   ├── go.sh                     # Go 镜像、项目发现、容器和缓存管理
-│   └── backup.sh                 # 备份、恢复、归档安全检查
+│   ├── common/                   # 全局公共层（六件套 + install 事务框架）
+│   │   ├── env.sh                # .env 读取侧、项目路径常量
+│   │   ├── log.sh                # 统一日志输出与终端交互
+│   │   ├── paths.sh              # 命名派生（服务键/容器名/卷名）与版本号校验
+│   │   ├── ports.sh              # 端口检查、占用报告与端口分配
+│   │   ├── docker.sh             # Docker 预检、Compose 通用调用与容器清理
+│   │   ├── config.sh             # 配置持久化工具（.env 写入侧）
+│   │   └── install.sh            # 安装事务生命周期与回滚框架
+│   ├── cli.sh                    # 命令路由实现与全局命令（show_help/cmd_list）
+│   ├── php/                      # PHP 线：common/{install,build,extensions,config}.sh + cli.sh + versions/
+│   ├── mysql/                    # MySQL 线：common/{install,port,config}.sh + cli.sh + versions/
+│   ├── redis/                    # Redis 线：common/{install,port,config}.sh + cli.sh + versions/
+│   ├── nginx/                    # Nginx 线：common/{install,reload,config}.sh + cli.sh + versions/
+│   ├── site/                     # site 线：common/{add,switch,list,hosts}.sh + cli.sh
+│   ├── go/                       # Go 线：common/{install,run,shell,server}.sh + cli.sh + versions/
+│   └── backup/                   # backup 线：common/{backup,restore}.sh + cli.sh
 ├── compose/
 │   ├── docker-compose.yml        # 共享网络等主配置
 │   └── services/                 # 按服务和版本拆分的 Compose 分片
@@ -166,7 +175,11 @@ phpbox/
 └── .env.example                  # 环境变量模板
 ```
 
-架构依赖方向固定为：`bin/phpbox` 路由到 `lib/*.sh`，业务模块复用 `common.sh`，构建模块生成 Compose 和服务配置；业务模块不得反向依赖 CLI 入口，也不得复制公共路径、日志、回滚和环境加载逻辑。
+加载链固定（需求文档 §七）：`bin/phpbox` → `lib/common/` 六件套 → `lib/common/install.sh` → 各服务线 common 全量 → 各线 cli → `load_env` → `lib/cli.sh`（预检与分发）。`versions/<版本>.sh` 为可选差异层，存在才装载，缺失回退本线 common 默认。
+
+过渡期说明：`lib/*.sh` 旧平铺文件当前保留为纯 source 兼容桥（零函数定义），仅供旧路径引用过渡；确认无外部引用后整批删除（迁移第 6 步），届时不得再新增任何平铺文件。
+
+架构依赖方向固定为：`bin/phpbox` 只做加载与转调，路由实现在 `lib/cli.sh`；各服务线复用 `lib/common/` 的公共能力；业务线不得反向依赖 CLI 入口或互相 source，跨线联动必须是显式动作（如 PHP 起容器后触发 `nginx_try_reload`）；运行时产物与源码层分开管理。
 
 ## 4. 工程执行流程
 
@@ -229,17 +242,18 @@ phpbox/
 固定依赖方向如下：
 
 ```text
-bin/phpbox
-	-> lib/*.sh
-		-> lib/common.sh 的公共能力
-		-> compose/ 和 config/ 的生成或校验
-		-> Docker/Compose 运行时
+bin/phpbox（薄入口：加载链 + 转调）
+	-> lib/cli.sh 的路由实现
+	-> lib/common/ 的公共能力（env/log/paths/ports/docker/config/install）
+	-> lib/<服务线>/common 与 lib/<服务线>/versions
+	-> compose/ 和 config/ 的生成或校验
+	-> Docker/Compose 运行时
 ```
 
-- `bin/phpbox` 只负责命令路由、参数转发和统一退出结果，不实现业务规则。
-- `lib/common.sh` 只提供环境、日志、路径、外部命令执行、公共校验和回滚基础设施；不得持续吸收具体服务的业务逻辑。
-- `lib/build.sh` 负责 PHP 构建编排；网络下载、APK/PECL 资产准备、Dockerfile 渲染、镜像构建和缓存晋升应保持可分辨的函数边界。
-- `lib/php.sh`、`lib/mysql.sh`、`lib/redis.sh`、`lib/nginx.sh`、`lib/site.sh`、`lib/go.sh` 只负责各自领域，不得反向调用 CLI 入口或依赖其他业务模块的私有函数。
+- `bin/phpbox` 只负责 bash 守护、固定顺序加载和转调 `lib/cli.sh`，不实现业务规则；命令路由、Docker 预检分发和帮助文本在 `lib/cli.sh`。
+- `lib/common/` 六件套只提供环境、日志、路径、端口、Docker 调用和配置持久化基础设施；`lib/common/install.sh` 提供安装事务与回滚框架。全局公共层不得持续吸收具体服务的业务逻辑。
+- `lib/php/common/build.sh` 负责 PHP 构建编排（含 APK 下载器与离线闭包晋升）；网络下载、APK/PECL 资产准备、Dockerfile 渲染、镜像构建和缓存晋升应保持可分辨的函数边界。
+- `lib/php/`、`lib/mysql/`、`lib/redis/`、`lib/nginx/`、`lib/site/`、`lib/go/`、`lib/backup/` 各线只负责各自领域；不得反向调用 CLI 入口，不得依赖其他业务线的私有函数，也不得在全局 common 存放本线业务。
 - 跨模块调用必须通过公共函数或明确的回调契约；不得依赖文件加载顺序提供隐式函数。
 - 生成配置必须先写临时文件并校验，成功后原子替换正式文件；运行期生成物不得被当作源码维护。
 - 同一生命周期模式只保留一个公共实现：预检 -> 准备 -> 执行 -> 健康检查 -> 提交/回滚。
@@ -309,7 +323,7 @@ bin/phpbox
 优先执行与修改切片最接近的检查；完整验收顺序如下：
 
 ```bash
-bash -n install.sh bin/phpbox lib/*.sh
+bash tests/lint.sh   # 覆盖 install.sh/bin/phpbox/lib 全部新旧形态
 bash tests/lint.sh
 bash tests/run.sh
 git diff --check

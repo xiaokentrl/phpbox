@@ -11,7 +11,7 @@ Run a pre-release validation for phpbox.
 
 1. Print a start stage and record the requested release scope.
 2. Inspect `git status --short`; do not modify or discard existing changes.
-3. Print a stage, then run Bash syntax checks for `install.sh`, `bin/phpbox`, and `lib/*.sh`.
+3. Print a stage, then run Bash syntax checks for `install.sh`, `bin/phpbox`, and all shell files under `lib/`.
 4. Print a stage, then run repository lint and behavior tests when present.
 5. Print a stage, then validate generated or sample Compose configuration when Docker is available, with a timeout.
 6. Print a stage, then inspect long network, build, archive, and health-check operations for timeout or no-response protection.

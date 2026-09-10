@@ -35,11 +35,11 @@ argument-hint: "Step number 0-7, or 'verify' to run all gates only"
 | 0 | 验证脚手架（tests/ 三闸门 + 本文件） | 完成 |
 | 1 | 函数归属清单（附录 A，"拆"标记函数需独立重构切片） | 进行中 |
 | 2 | 目录骨架 + 空职责文件（按需求文档 §三 目标树） | 待办 |
-| 3 | 按线切片纯搬运（redis → mysql → nginx → site → go → backup → php/build → common 全局件） | 待办 |
-| 4 | 旧 lib/*.sh 转兼容桥（source 新结构，新旧双可用） | 待办 |
-| 5 | bin/phpbox 切新加载链（common → 线common → versions） | 待办 |
+| 3 | 按线切片纯搬运（redis → mysql → nginx → site → go → backup → php/build → common 全局件） | 完成 |
+| 4 | 旧 lib/*.sh 转兼容桥（source 新结构，新旧双可用） | 完成 |
+| 5 | bin/phpbox 切新加载链（common → 线common → versions） | 完成 |
 | 6 | 观察期后删旧平铺脚本与重复逻辑 | 待办 |
-| 7 | 全面验证 + 同步 AGENTS.md/README/.github 指令中的 lib 路径引用 | 待办 |
+| 7 | 全面验证 + 同步 AGENTS.md/README/.github 指令中的 lib 路径引用 | 完成 |
 
 ## 附录 A：函数归属清单（第 1 步产出，137 个函数全覆盖）
 
