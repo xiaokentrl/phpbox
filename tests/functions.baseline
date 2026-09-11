@@ -31,11 +31,14 @@ _install_rollback_commit
 _install_rollback_run
 _load_apk_mirrors
 _mysql_clean_stale_sock
+_mysql_ensure_image
 _mysql_ensure_running
 _mysql_generate_compose
 _mysql_install
+_mysql_offline_image_path
 _mysql_port_set
 _mysql_purge
+_mysql_save_image_to_offline
 _mysql_show_list
 _mysql_uninstall
 _nginx_effective_version

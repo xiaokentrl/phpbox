@@ -64,7 +64,7 @@ phpbox php install 8.4 --ext gd,redis  # 全新安装时直接指定扩展集
 
 ### 场景 3：断网重装 / 换机迁移
 
-只要 `offline/php/<版本>/` 里有已验证的 APK 闭包和 PECL 包（上次成功构建自动晋升），断网也能完整重装：
+只要 `offline/` 里有已验证的资产（PHP：`php/<版本>/` 的 APK 闭包 + PECL 包；MySQL：`mysql/<版本>/` 镜像 tar——首次安装自动回写），断网也能完整重装：
 
 ```bash
 phpbox php uninstall 8.4
@@ -108,7 +108,7 @@ Go 容器源码挂 `/workspace`、按版本持久化 GOPATH 缓存，不发布�
 
 | 命令 | 说明 |
 | --- | --- |
-| `phpbox mysql install <版本> [--port 端口]` | 安装 MySQL，完成后显示 root 密码（存入 `.env`） |
+| `phpbox mysql install <版本> [--port 端口]` | 安装 MySQL（镜像优先走 `offline/mysql/<版本>/` 离线命中，未命中在线拉取后自动回写离线库），完成后显示 root 密码（存入 `.env`） |
 | `phpbox mysql port set <版本> <新端口>` | 修改端口（失败自动回滚） |
 | `phpbox mysql list` | 列出所有 MySQL 实例 |
 | `phpbox mysql uninstall <版本> [--purge]` | 卸载（`--purge` 连同数据目录清除） |
@@ -215,7 +215,7 @@ $HOME/phpbox/
 │   ├── common/                   # 全局公共层：env/log/paths/ports/docker/config 六件套 + install 事务框架
 │   ├── cli.sh                    # 命令路由实现与全局命令（help/list）
 │   ├── php/                       # PHP 线：common/{install,extensions,apk-fetch,offline,build,config} + versions/ + cli.sh
-│   ├── mysql/                     # MySQL 线：common/{install,port,config} + versions/ + cli.sh
+│   ├── mysql/                     # MySQL 线：common/{install,offline,port,config} + versions/ + cli.sh
 │   ├── redis/                     # Redis 线：common/{install,port,config} + versions/ + cli.sh
 │   ├── nginx/                     # Nginx 线：common/{install,reload,config} + versions/ + cli.sh
 │   ├── site/                      # 站点与 hosts：common/{add,switch,list,hosts} + cli.sh
@@ -225,7 +225,7 @@ $HOME/phpbox/
 │   ├── docker-compose.yml        # 主 compose（仅定义共享网络）
 │   └── services/                 # 每个服务版本一个 yml 分片（如 php-8.4.yml）
 ├── config/                       # 各服务版本配置与 PHP 扩展清单
-├── offline/                      # 离线构建缓存（php/<版本>/apk/、pecl/）
+├── offline/                      # 离线缓存（php/<版本>/apk+pecl/；mysql/<版本>/ 镜像 tar）
 ├── cache/go/<版本>/               # Go GOPATH 模块和工具缓存
 ├── backups/                      # 备份归档
 ├── logs/                         # Nginx 与 PHP 日志
@@ -242,7 +242,7 @@ $HOME/phpbox/
 | `config/mysql/*/my.cnf`、`config/nginx/*/{nginx.conf,conf.d/}`、`config/redis/*/redis.conf` | 首次安装时从镜像提取或生成，用户可直接修改 |
 | `config/nginx/sites/*.conf` | `site add` |
 | `config/php/*/extensions.env`、`logs/*.log`、`backups/*.tar.gz` | 安装过程与运行期 |
-| `offline/`、`cache/go/` | 构建验证成功后自动晋升 / Go 命令 |
+| `offline/`（php 构建闭包 + mysql 镜像 tar）、`cache/go/` | 构建验证成功后自动晋升 / mysql 拉取后回写 / Go 命令 |
 
 ## 测试与验收
 
@@ -332,7 +332,7 @@ Extension state lives in `config/php/8.4/extensions.env`, maintained per version
 
 ### Scenario 3: reinstall offline / migrate machines
 
-As long as `offline/php/<version>/` holds verified APK closures and PECL tarballs (promoted automatically after each successful build), a full reinstall works with no network:
+As long as `offline/` holds verified assets (PHP: APK closures + PECL tarballs under `php/<version>/`; MySQL: image tars under `mysql/<version>/`, auto-saved on first install), a full reinstall works with no network:
 
 ```bash
 phpbox php uninstall 8.4
@@ -376,7 +376,7 @@ Go containers mount sources at `/workspace`, persist GOPATH caches per version, 
 
 | Command | Description |
 | --- | --- |
-| `phpbox mysql install <version> [--port N]` | Install MySQL; root password shown and saved to `.env` |
+| `phpbox mysql install <version> [--port N]` | Install MySQL (image prefers the `offline/mysql/<version>/` cache, online pull auto-saved back); root password shown and saved to `.env` |
 | `phpbox mysql port set <version> <new>` | Change port (auto-rollback on failure) |
 | `phpbox mysql list` | List MySQL instances |
 | `phpbox mysql uninstall <version> [--purge]` | Uninstall (`--purge` also removes the data directory) |
@@ -485,7 +485,7 @@ $HOME/phpbox/
 │   ├── php/ mysql/ redis/ nginx/ site/ go/ backup/   # service lines, each with common/, versions/, cli.sh
 ├── compose/                      # main compose (shared network) + per-service-version yml fragments
 ├── config/                       # per-version service configs and PHP extension manifests
-├── offline/                      # offline build cache (php/<version>/apk/, pecl/)
+├── offline/                      # offline cache (php/<version>/apk+pecl/; mysql/<version>/ image tars)
 ├── cache/go/<version>/           # Go GOPATH module and tool caches
 ├── backups/                      # backup archives
 ├── logs/                         # Nginx and PHP logs
@@ -502,7 +502,7 @@ The repository **tracks only sources and templates**: `bin/phpbox`, `lib/`, `ins
 | `config/mysql/*/my.cnf`, `config/nginx/*/{nginx.conf,conf.d/}`, `config/redis/*/redis.conf` | extracted from images or generated on first install; user-editable |
 | `config/nginx/sites/*.conf` | `site add` |
 | `config/php/*/extensions.env`, `logs/*.log`, `backups/*.tar.gz` | install process & runtime |
-| `offline/`, `cache/go/` | promoted after verified builds / Go commands |
+| `offline/` (php build closures + mysql image tars), `cache/go/` | promoted after verified builds / written back after mysql pull / Go commands |
 
 ## Testing
 

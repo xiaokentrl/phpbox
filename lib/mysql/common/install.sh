@@ -40,6 +40,9 @@ _mysql_install() {
   local ver="${1:-}"
   [ -z "$ver" ] && error "用法: phpbox mysql install <版本> [--port 端口]"
   shift
+  # 镜像获取走离线事务（offline/mysql/<版本>/ 命中则零网络），
+  # 必须在 _generic_service_install 之前：配置生成与容器启动都依赖镜像已在本地
+  _mysql_ensure_image "$ver" "install"
   _generic_service_install "mysql" "$ver" "3306" "$@"
   # 本地开发场景：安装完成直接亮出 root 密码，免翻 .env。
   # 自定义密码：安装前在 .env 预设 MYSQL_<去点版本>_ROOT_PASSWORD，留空则自动生成
