@@ -61,11 +61,15 @@ _php_install() {
   if [ -z "$exts" ]; then
     exts="$PHP_DEFAULT_EXTENSIONS"
   fi
+  # 顺序约束：init_config_files 必须先于 _php_write_extensions——后者直接写
+  # $PHP_CONFIG_DIR/<版本>/extensions.env，目录不存在时重定向 ENOENT 直接崩；
+  # 也不能反向在 _php_write_extensions 里补 mkdir：init_config_files 对"非空但
+  # 缺 php.ini"的目录会 rm -rf 重建，刚写的扩展状态会被静默抹掉
+  init_config_files "php" "$ver"
   if [ -n "$exts" ]; then
     _php_validate_extensions "$exts"
     _php_write_extensions "$ver" "$exts"
   fi
-  init_config_files "php" "$ver"
   _php_generate_compose "$ver"
   _php_ensure_running "$ver"
   _install_rollback_commit
