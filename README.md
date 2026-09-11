@@ -73,6 +73,8 @@ phpbox php install 8.4        # 备份命中，全程零网络
 
 换机用备份迁移：`phpbox backup` 打包 `.env`、`config/`、`offline/` 离线库、站点源码（`WWW_ROOT`）、MySQL 数据与全部数据卷；新机器 `phpbox restore backups/backup-<时间戳>.tar.gz`。
 
+离线库的磁盘占用构成（大致量级，随版本增长）：PHP 每个版本 APK 闭包约 94–150M + PECL 包约 1M；MySQL 每个版本镜像 tar 约 240M–1.1G（8.x 偏大）；Redis 约 40M；Nginx 约 30M。不需要某版本时可整目录删除 `offline/<服务>/<版本>/`（下次安装会重新联网拉取并回写），也可在换机前清理瘦身备份。
+
 ### 场景 4：多 MySQL 并行调试
 
 ```bash
@@ -340,6 +342,8 @@ phpbox php install 8.4        # cache hits all the way — zero network
 ```
 
 To move machines, `phpbox backup` archives `.env`, `config/`, the `offline/` library, site sources (`WWW_ROOT`), MySQL data, and all volumes; restore on the new host with `phpbox restore backups/backup-<timestamp>.tar.gz`.
+
+Rough disk footprint of the offline library (grows with versions): PHP ~94–150M APK closure plus ~1M PECL per version; MySQL ~240M–1.1G per version (8.x is the heavy side); Redis ~40M; Nginx ~30M. To free space, delete an entire `offline/<service>/<version>/` directory — the next install simply pulls online again and re-populates it; trimming before a machine migration also shrinks the backup.
 
 ### Scenario 4: parallel MySQL versions for debugging
 
