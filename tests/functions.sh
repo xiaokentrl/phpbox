@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# 收集当前函数定义（迁移期间 lib/*.sh 与 lib/**/*.sh 并存，统一纳入）
+# 收集当前函数定义（lib/ 全部 shell 文件；迁移第 6 步后已无平铺桥，仅剩分层文件与 cli.sh）
 current_file=$(mktemp)
 { find lib -name '*.sh' -type f | sort; echo bin/phpbox; } |
   xargs grep -hoE '^[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*\(\)' |

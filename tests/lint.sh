@@ -1,6 +1,6 @@
 #!/bin/bash
 # 语法与结构静态检查：所有 shell 源码过 bash -n；lib 内不允许出现 Bash 保留字误用
-# 导致的解析错误；迁移期间同时覆盖 lib/*.sh（旧平铺）与 lib/**/*.sh（新分层）。
+# 导致的解析错误。迁移第 6 步删桥后 lib/ 下唯一平铺文件是 cli.sh（路由实现本体）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

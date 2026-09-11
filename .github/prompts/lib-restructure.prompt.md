@@ -38,7 +38,7 @@ argument-hint: "Step number 0-7, or 'verify' to run all gates only"
 | 3 | 按线切片纯搬运（redis → mysql → nginx → site → go → backup → php/build → common 全局件） | 完成 |
 | 4 | 旧 lib/*.sh 转兼容桥（source 新结构，新旧双可用） | 完成 |
 | 5 | bin/phpbox 切新加载链（common → 线common → versions） | 完成 |
-| 6 | 观察期后删旧平铺脚本与重复逻辑 | 待办 |
+| 6 | 观察期后删旧平铺脚本与重复逻辑 | 完成（2026-09-12 删 9 桥，lib/ 仅剩 cli.sh 本体；引用核零：install.sh/bin/phpbox/tests 均无旧路径引用） |
 | 7 | 全面验证 + 同步 AGENTS.md/README/.github 指令中的 lib 路径引用 | 完成 |
 
 ## 附录 A：函数归属清单（第 1 步产出，137 个函数全覆盖）
