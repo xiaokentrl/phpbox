@@ -1,10 +1,12 @@
 #!/bin/bash
-# mysql-offline 行为验证：MySQL 镜像离线事务（offline/mysql/<版本>/ 命中即零网络）
-# 用假 docker / 假 tar 替身钉住四条路径，不需要真实 Docker 与网络：
+# 镜像离线事务行为验证（公共层 _ensure_offline_image，mysql/redis 两线共用）：
+# 用假 docker / 假 tar 替身钉住路径，不需要真实 Docker 与网络：
 #   场景 1：镜像已在本地 → 不 load 不 pull，直接返回镜像名
 #   场景 2：离线库命中 → docker load，零 pull；load 后镜像名不匹配 → 拦截报错
 #   场景 3：未命中 → docker pull，install 模式回写离线库（save→tar 校验→原子替换）
 #   场景 4：preload 模式 → pull 成功但不回写
+#   场景 5：redis tag 变体 → redis:8-alpine 的离线库目录是裸版本号 offline/redis/8/
+#         （版本与 tag 后缀不同是公共层分参传值的原因，此断言钉住该映射）
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -64,8 +66,10 @@ export PATH="$box/fakebin:$PATH"
 
 source lib/common/log.sh
 source lib/common/env.sh
+source lib/common/docker.sh          # 公共层：_ensure_offline_image 本体
 export OFFLINE_DIR="$box/offline"   # 沙箱离线库，测试后随 trap 清理
-source lib/mysql/common/offline.sh
+source lib/mysql/common/offline.sh  # 薄绑定：mysql:<版本>
+source lib/redis/common/offline.sh  # 薄绑定：redis:<版本>-alpine
 
 # ---- 场景 1：镜像已在本地 → 零 load 零 pull ----
 rm -f "$FAKE_DOCKER_LOG"
@@ -126,6 +130,23 @@ out=$(_mysql_ensure_image "miss" "preload" 2>"$box/s4.log")
 grep -q 'docker pull' "$FAKE_DOCKER_LOG" && ok "场景4 preload 仍拉取" || bad "场景4 未拉取"
 if grep -q 'docker save' "$FAKE_DOCKER_LOG"; then bad "场景4 preload 不应回写"; else ok "场景4 preload 不回写离线库"; fi
 
+# ---- 场景 5：redis tag 变体 → 离线库目录用裸版本号，tag 带 -alpine 后缀 ----
+rm -f "$FAKE_DOCKER_LOG"; : > "$FAKE_LOADED_STATE"
+mkdir -p "$OFFLINE_DIR/redis/8"
+echo fake-tar-body > "$OFFLINE_DIR/redis/8/redis-8.tar"
+export FAKE_LOAD_IMAGE="redis:8-alpine"
+out=$(_redis_ensure_image "8" "install" 2>"$box/s5.log")
+[ "$out" = "redis:8-alpine" ] && ok "场景5 redis 返回带 -alpine 的 tag" || bad "场景5 返回值异常: $out（$(cat "$box/s5.log")）"
+grep -q 'docker load' "$FAKE_DOCKER_LOG" && ok "场景5 命中走 docker load" || bad "场景5 未调用 load"
+if grep -q 'docker pull' "$FAKE_DOCKER_LOG"; then bad "场景5 命中仍 pull"; else ok "场景5 命中零 pull"; fi
+unset FAKE_LOAD_IMAGE
+# redis 未命中拉取后回写：目录必须落在裸版本号 offline/redis/7/ 而非 7-alpine
+rm -f "$FAKE_DOCKER_LOG"; : > "$FAKE_LOADED_STATE"; rm -rf "$OFFLINE_DIR/redis/7"
+FAKE_LOAD_IMAGE="redis:7-alpine" out=$(_redis_ensure_image "7" "install" 2>"$box/s5b.log")
+grep -q 'docker pull redis:7-alpine' "$FAKE_DOCKER_LOG" && ok "场景5b 拉取 redis:7-alpine" || bad "场景5b 未拉取正确 tag"
+rtarf="$OFFLINE_DIR/redis/7/redis-7.tar"
+[ -f "$rtarf" ] && ok "场景5b 回写落在裸版本目录（$rtarf）" || bad "场景5b 离线库路径错误，实际找: $rtarf"
+
 echo "----------------------------------------"
-echo "mysql-offline: PASS=$pass FAIL=$fail"
+echo "image-offline: PASS=$pass FAIL=$fail"
 [ $fail -eq 0 ] || exit 1

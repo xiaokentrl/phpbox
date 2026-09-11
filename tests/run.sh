@@ -21,8 +21,8 @@ bash tests/offline-first.sh || rc=1
 echo "==== [5/6] install 顺序回归 (tests/install-order.sh) ===="
 bash tests/install-order.sh || rc=1
 
-echo "==== [6/6] mysql 镜像离线行为验证 (tests/mysql-offline.sh) ===="
-bash tests/mysql-offline.sh || rc=1
+echo "==== [6/6] 镜像离线行为验证 (tests/image-offline.sh) ===="
+bash tests/image-offline.sh || rc=1
 
 if [ $rc -eq 0 ]; then echo "==== tests/run.sh 全部通过 ===="
 else echo "==== tests/run.sh 存在失败项 ====" >&2; fi

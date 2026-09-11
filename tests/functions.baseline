@@ -1,5 +1,6 @@
 _apk_mirror_host_args
 _apk_ranked_fetch_run
+_ensure_offline_image
 _env_read_file
 _env_strip_quotes
 _generic_db_port_set
@@ -22,6 +23,7 @@ _go_validate_project_name
 _hosts_add
 _hosts_list
 _hosts_remove
+_image_offline_tar_path
 _init_mysql_config
 _init_nginx_config
 _init_php_config
@@ -35,10 +37,8 @@ _mysql_ensure_image
 _mysql_ensure_running
 _mysql_generate_compose
 _mysql_install
-_mysql_offline_image_path
 _mysql_port_set
 _mysql_purge
-_mysql_save_image_to_offline
 _mysql_show_list
 _mysql_uninstall
 _nginx_effective_version
@@ -82,6 +82,7 @@ _php_validate_extensions
 _php_write_extensions
 _phpbox_start_stopped
 _phpbox_stop_svc
+_redis_ensure_image
 _redis_ensure_running
 _redis_generate_compose
 _redis_install
@@ -93,6 +94,7 @@ _restore_collect_invalid_paths
 _restore_list_vol_files
 _restore_volumes
 _rm_rf_with_docker_fallback
+_save_image_to_offline
 _site_add
 _site_atomic_replace
 _site_remove
