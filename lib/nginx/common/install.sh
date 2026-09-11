@@ -54,6 +54,10 @@ _nginx_install() {
     get_or_set_port "nginx" "default" "80" > /dev/null   # 未指定端口：自动挑空闲端口并记录
   fi
 
+  # 镜像获取走离线事务（offline/nginx/<tag>/ 命中则零网络），在生成配置前：
+  # _nginx_generate_compose 写入的 image tag 与此处取值保持一致
+  _nginx_ensure_image "${NGINX_VERSION:-alpine}" "install"
+
   _nginx_generate_compose
   _nginx_ensure_running
   success "Nginx 安装完成，端口: $(read_env_value "NGINX_PORT" "")"

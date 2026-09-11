@@ -64,7 +64,7 @@ phpbox php install 8.4 --ext gd,redis  # 全新安装时直接指定扩展集
 
 ### 场景 3：断网重装 / 换机迁移
 
-只要 `offline/` 里有已验证的资产（PHP：`php/<版本>/` 的 APK 闭包 + PECL 包；MySQL/Redis：`mysql/<版本>/`、`redis/<版本>/` 镜像 tar——首次安装自动回写），断网也能完整重装：
+只要 `offline/` 里有已验证的资产（PHP：`php/<版本>/` 的 APK 闭包 + PECL 包；MySQL/Redis/Nginx：`mysql/<版本>/`、`redis/<版本>/`、`nginx/<tag>/` 镜像 tar——首次安装自动回写），断网也能完整重装：
 
 ```bash
 phpbox php uninstall 8.4
@@ -126,7 +126,7 @@ Go 容器源码挂 `/workspace`、按版本持久化 GOPATH 缓存，不发布�
 
 | 命令 | 说明 |
 | --- | --- |
-| `phpbox nginx install [--port 端口]` | 安装 Nginx（镜像 tag 由 `NGINX_VERSION` 决定，默认 `alpine`） |
+| `phpbox nginx install [--port 端口]` | 安装 Nginx（镜像优先走 `offline/nginx/<tag>/` 离线命中；tag 由 `NGINX_VERSION` 决定，默认 `alpine`） |
 | `phpbox nginx port set <新端口>` | 修改端口 |
 | `phpbox nginx reload` | 校验配置并重载 |
 | `phpbox nginx uninstall` | 卸载（保留配置与站点） |
@@ -225,7 +225,7 @@ $HOME/phpbox/
 │   ├── docker-compose.yml        # 主 compose（仅定义共享网络）
 │   └── services/                 # 每个服务版本一个 yml 分片（如 php-8.4.yml）
 ├── config/                       # 各服务版本配置与 PHP 扩展清单
-├── offline/                      # 离线缓存（php/<版本>/apk+pecl/；mysql、redis/<版本>/ 镜像 tar）
+├── offline/                      # 离线缓存（php/<版本>/apk+pecl/；mysql、redis/<版本>/ 与 nginx/<tag>/ 镜像 tar）
 ├── cache/go/<版本>/               # Go GOPATH 模块和工具缓存
 ├── backups/                      # 备份归档
 ├── logs/                         # Nginx 与 PHP 日志
@@ -332,7 +332,7 @@ Extension state lives in `config/php/8.4/extensions.env`, maintained per version
 
 ### Scenario 3: reinstall offline / migrate machines
 
-As long as `offline/` holds verified assets (PHP: APK closures + PECL tarballs under `php/<version>/`; MySQL & Redis: image tars under `mysql/<version>/` and `redis/<version>/`, auto-saved on first install), a full reinstall works with no network:
+As long as `offline/` holds verified assets (PHP: APK closures + PECL tarballs under `php/<version>/`; MySQL, Redis & Nginx: image tars under `mysql/<version>/`, `redis/<version>/` and `nginx/<tag>/`, auto-saved on first install), a full reinstall works with no network:
 
 ```bash
 phpbox php uninstall 8.4
@@ -394,7 +394,7 @@ Go containers mount sources at `/workspace`, persist GOPATH caches per version, 
 
 | Command | Description |
 | --- | --- |
-| `phpbox nginx install [--port N]` | Install Nginx (image tag from `NGINX_VERSION`, default `alpine`) |
+| `phpbox nginx install [--port N]` | Install Nginx (image prefers the `offline/nginx/<tag>/` cache; tag from `NGINX_VERSION`, default `alpine`) |
 | `phpbox nginx port set <new>` | Change port |
 | `phpbox nginx reload` | Validate config and reload |
 | `phpbox nginx uninstall` | Uninstall (config and sites kept) |
@@ -485,7 +485,7 @@ $HOME/phpbox/
 │   ├── php/ mysql/ redis/ nginx/ site/ go/ backup/   # service lines, each with common/, versions/, cli.sh
 ├── compose/                      # main compose (shared network) + per-service-version yml fragments
 ├── config/                       # per-version service configs and PHP extension manifests
-├── offline/                      # offline cache (php/<version>/apk+pecl/; mysql & redis/<version>/ image tars)
+├── offline/                      # offline cache (php/<version>/apk+pecl/; mysql & redis/<version>/, nginx/<tag>/ image tars)
 ├── cache/go/<version>/           # Go GOPATH module and tool caches
 ├── backups/                      # backup archives
 ├── logs/                         # Nginx and PHP logs

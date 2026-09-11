@@ -96,7 +96,7 @@ absent -> preparing -> configured -> starting -> healthy -> committed
 - 每个状态必须说明检测依据、允许的下一状态、中断恢复方式和孤儿资源清理方式。
 - 提交前不得删除旧配置、旧容器、旧镜像、旧数据卷或旧缓存。
 - 每个 CLI 命令必须定义参数、默认值、兼容别名、修改资源、幂等行为和稳定错误分类。
-- `mysql install` / `redis install` 获取官方镜像走公共离线事务（`lib/common/docker.sh` 的 `_ensure_offline_image`，各线 `common/offline.sh` 只做薄绑定）：优先命中 `offline/<服务>/<版本>/<服务>-<版本>.tar`（`docker load` 零网络），未命中才 `docker pull` 并在拉取成功后回写离线库（临时文件 + tar 可读性校验 + 原子替换；回写失败仅告警不中断安装）。load 后镜像名与版本目录不匹配必须报错，禁止静默回退在线路径绕过离线契约。redis 的镜像 tag 带后缀（`redis:8-alpine`）而离线库目录用裸版本号，公共层因此把版本与 tag 分开传参。
+- `mysql install` / `redis install` / `nginx install` 获取官方镜像走公共离线事务（`lib/common/docker.sh` 的 `_ensure_offline_image`，各线 `common/offline.sh` 只做薄绑定）：优先命中 `offline/<服务>/<版本>/<服务>-<版本>.tar`（`docker load` 零网络），未命中才 `docker pull` 并在拉取成功后回写离线库（临时文件 + tar 可读性校验 + 原子替换；回写失败仅告警不中断安装）。load 后镜像名与版本目录不匹配必须报错，禁止静默回退在线路径绕过离线契约。redis 的镜像 tag 带后缀（`redis:8-alpine`）而离线库目录用裸版本号，公共层因此把版本与 tag 分开传参。
 - `redis install` 省略版本时使用官方最新稳定主版本 `8`（镜像 tag `redis:8-alpine`）；省略 `--port` 时使用 Redis 默认端口 `6379`；安装完成必须像 MySQL 一样把端口和认证密码持久化到 `.env`，密码键为 `REDIS_<去点版本>_ROOT_PASSWORD`。显式版本和端口必须原样校验并使用。
 - Redis 每个版本必须生成并挂载本地可编辑配置 `config/redis/<版本>/redis.conf`；Compose 以只读方式挂载该文件，安装/重建不得用镜像内默认配置替代本地配置。密码继续只保存在 `.env`，不得写入 `redis.conf`。
 - stdout 只输出调用方需要捕获的结果；stderr 输出进度、警告、诊断、失败和回滚信息。
@@ -153,7 +153,7 @@ phpbox/
 │   ├── php/                      # PHP 线：common/{install,build,extensions,config}.sh + cli.sh + versions/
 │   ├── mysql/                    # MySQL 线：common/{install,offline,port,config}.sh + cli.sh + versions/
 │   ├── redis/                    # Redis 线：common/{install,offline,port,config}.sh + cli.sh + versions/
-│   ├── nginx/                    # Nginx 线：common/{install,reload,config}.sh + cli.sh + versions/
+│   ├── nginx/                    # Nginx 线：common/{install,offline,reload,config}.sh + cli.sh + versions/
 │   ├── site/                     # site 线：common/{add,switch,list,hosts}.sh + cli.sh
 │   ├── go/                       # Go 线：common/{install,run,shell,server}.sh + cli.sh + versions/
 │   └── backup/                   # backup 线：common/{backup,restore}.sh + cli.sh
@@ -166,7 +166,8 @@ phpbox/
 │   └── php/<版本>/
 ├── cache/go/<版本>/              # Go GOPATH 模块和工具缓存
 ├── offline/php/<版本>/           # 已验证的 APK/PECL 离线缓存
-├── offline/mysql/<版本>/          # 已拉取验证的官方镜像 tar（mysql/redis，docker load 零网络安装）
+├── offline/{mysql,redis}/<版本>/   # 已拉取验证的官方镜像 tar（docker load 零网络安装）
+├── offline/nginx/<tag>/            # 同上（目录名用镜像 tag，如 alpine）
 ├── logs/                         # Nginx 和 PHP 日志
 ├── backups/                      # 备份归档
 ├── tests/                        # 结构、语法和行为回归测试

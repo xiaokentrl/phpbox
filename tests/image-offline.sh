@@ -7,6 +7,7 @@
 #   场景 4：preload 模式 → pull 成功但不回写
 #   场景 5：redis tag 变体 → redis:8-alpine 的离线库目录是裸版本号 offline/redis/8/
 #         （版本与 tag 后缀不同是公共层分参传值的原因，此断言钉住该映射）
+#   场景 6：nginx tag 别名 → 离线库目录名就是 tag 本身（alpine/1.25，非数字版本）
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -70,6 +71,7 @@ source lib/common/docker.sh          # 公共层：_ensure_offline_image 本体
 export OFFLINE_DIR="$box/offline"   # 沙箱离线库，测试后随 trap 清理
 source lib/mysql/common/offline.sh  # 薄绑定：mysql:<版本>
 source lib/redis/common/offline.sh  # 薄绑定：redis:<版本>-alpine
+source lib/nginx/common/offline.sh # 薄绑定：nginx:<tag 别名>
 
 # ---- 场景 1：镜像已在本地 → 零 load 零 pull ----
 rm -f "$FAKE_DOCKER_LOG"
@@ -146,6 +148,25 @@ FAKE_LOAD_IMAGE="redis:7-alpine" out=$(_redis_ensure_image "7" "install" 2>"$box
 grep -q 'docker pull redis:7-alpine' "$FAKE_DOCKER_LOG" && ok "场景5b 拉取 redis:7-alpine" || bad "场景5b 未拉取正确 tag"
 rtarf="$OFFLINE_DIR/redis/7/redis-7.tar"
 [ -f "$rtarf" ] && ok "场景5b 回写落在裸版本目录（$rtarf）" || bad "场景5b 离线库路径错误，实际找: $rtarf"
+
+# ---- 场景 6：nginx tag 别名 → 离线库目录名就是 tag 本身（非数字版本） ----
+rm -f "$FAKE_DOCKER_LOG"; : > "$FAKE_LOADED_STATE"
+mkdir -p "$OFFLINE_DIR/nginx/alpine"
+echo fake-tar-body > "$OFFLINE_DIR/nginx/alpine/nginx-alpine.tar"
+export FAKE_LOAD_IMAGE="nginx:alpine"
+out=$(_nginx_ensure_image "alpine" "install" 2>"$box/s6.log")
+unset FAKE_LOAD_IMAGE
+[ "$out" = "nginx:alpine" ] && ok "场景6 nginx 返回 tag 别名" || bad "场景6 返回值异常: $out（$(cat "$box/s6.log")）"
+grep -q 'docker load' "$FAKE_DOCKER_LOG" && ok "场景6 命中走 docker load" || bad "场景6 未调用 load"
+if grep -q 'docker pull' "$FAKE_DOCKER_LOG"; then bad "场景6 命中仍 pull"; else ok "场景6 命中零 pull"; fi
+# 未命中拉取后回写：目录必须落在 tag 名 offline/nginx/1.25/
+rm -f "$FAKE_DOCKER_LOG"; : > "$FAKE_LOADED_STATE"; rm -rf "$OFFLINE_DIR/nginx/1.25"
+export FAKE_LOAD_IMAGE="nginx:1.25"
+out=$(_nginx_ensure_image "1.25" "install" 2>"$box/s6b.log")
+unset FAKE_LOAD_IMAGE
+grep -q 'docker pull nginx:1.25' "$FAKE_DOCKER_LOG" && ok "场景6b 拉取 nginx:1.25" || bad "场景6b 未拉取正确 tag"
+ntarf="$OFFLINE_DIR/nginx/1.25/nginx-1.25.tar"
+[ -f "$ntarf" ] && ok "场景6b 回写落在 tag 目录（$ntarf）" || bad "场景6b 离线库路径错误"
 
 echo "----------------------------------------"
 echo "image-offline: PASS=$pass FAIL=$fail"

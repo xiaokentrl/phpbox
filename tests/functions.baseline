@@ -42,6 +42,7 @@ _mysql_purge
 _mysql_show_list
 _mysql_uninstall
 _nginx_effective_version
+_nginx_ensure_image
 _nginx_ensure_running
 _nginx_generate_compose
 _nginx_inject_sites_include
