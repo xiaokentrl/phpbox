@@ -12,11 +12,12 @@ config/php/*/Dockerfile
 config/php/*/php.ini
 config/php/*/pecl/
 config/php/*/apk/
+config/php/*/extensions.env
 config/mysql/*/my.cnf
 config/nginx/*/nginx.conf
 config/nginx/*/conf.d/
 config/nginx/sites/*.conf
-config/php/*/extensions.env
+config/redis/*/redis.conf
 
 # ── 离线备份库：二进制体积大且由构建自动沉淀，迁移走 phpbox backup ──
 offline/
