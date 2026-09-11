@@ -48,8 +48,11 @@ _nginx_inject_sites_include() {
 # 从指定版本的 nginx 镜像拷出默认配置，并注入站点目录 include
 _init_nginx_config() {
   local dir=$1 ver=$2
+  # 提取后立即归一化属主：一次性容器内以 root 拷出的文件归宿主不可写，而注入要
+  # grep 重写 nginx.conf——第一安装有 init_config_files 末尾的 chown 兜底，但注入
+  # 发生在其 case 分支内（chown 之前），顺序上必须由容器内 chown 自保
   docker run --rm -v "$dir":/out "nginx:${ver}" \
-    sh -c "cp -r /etc/nginx/conf.d /out/ && cp /etc/nginx/nginx.conf /out/" || {
+    sh -c "cp -r /etc/nginx/conf.d /out/ && cp /etc/nginx/nginx.conf /out/ && chown -R $(id -u):$(id -g) /out/" || {
     rm -rf "$dir"; error "Nginx 配置提取失败"
   }
   _nginx_inject_sites_include "$dir/nginx.conf"
@@ -92,10 +95,19 @@ _nginx_generate_compose() {
 
   init_config_files "nginx" "$ver"
 
-  # 配置已存在时 init_config_files 会跳过重建，这里再跑一次幂等注入：
+  # 配置已存在时 init_config_files 会跳过重建（保留用户配置），这里再跑一次幂等注入：
   # 旧版把 sites include 插在 http{ 首行（mime.types 之前），此处统一规范化到 conf.d 之后
   local conf="$CONFIG_DIR/nginx/${ver}/nginx.conf"
   if [ -f "$conf" ]; then
+    # 历史版本的提取器没做属主归一化，可能留下容器内 root 写出的 nginx.conf——
+    # 注入要重写它，宿主用户无权限。先探测可写性，不行就借一次性容器把属主修回来
+    # （一次修复，之后正常路径不再触发）
+    if ! [ -w "$conf" ]; then
+      log "nginx.conf 属主异常（root 残留），借容器修复属主..."
+      docker run --rm -v "$CONFIG_DIR/nginx/${ver}":/dir alpine \
+        chown -R "$(id -u):$(id -g)" /dir 2>/dev/null || \
+        error "无法修复 ${conf} 属主，请手动: sudo chown -R $(id -u):$(id -g) $CONFIG_DIR/nginx/${ver}"
+    fi
     _nginx_inject_sites_include "$conf"
   fi
 

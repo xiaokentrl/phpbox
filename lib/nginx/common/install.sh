@@ -56,7 +56,7 @@ _nginx_install() {
 
   # 镜像获取走离线事务（offline/nginx/<tag>/ 命中则零网络），在生成配置前：
   # _nginx_generate_compose 写入的 image tag 与此处取值保持一致
-  _nginx_ensure_image "${NGINX_VERSION:-alpine}" "install"
+  _nginx_ensure_image "${NGINX_VERSION:-alpine}" "install" >/dev/null   # stdout 的镜像名无人捕获，吞掉防终端污染
 
   _nginx_generate_compose
   _nginx_ensure_running

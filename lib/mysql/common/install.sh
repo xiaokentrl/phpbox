@@ -42,7 +42,7 @@ _mysql_install() {
   shift
   # 镜像获取走离线事务（offline/mysql/<版本>/ 命中则零网络），
   # 必须在 _generic_service_install 之前：配置生成与容器启动都依赖镜像已在本地
-  _mysql_ensure_image "$ver" "install"
+  _mysql_ensure_image "$ver" "install" >/dev/null   # stdout 的镜像名无人捕获，吞掉防终端污染
   _generic_service_install "mysql" "$ver" "3306" "$@"
   # 本地开发场景：安装完成直接亮出 root 密码，免翻 .env。
   # 自定义密码：安装前在 .env 预设 MYSQL_<去点版本>_ROOT_PASSWORD，留空则自动生成

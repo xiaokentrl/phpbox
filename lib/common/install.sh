@@ -80,7 +80,9 @@ init_config_files() {
     return
   fi
 
-  [ -d "$dir" ] && rm -rf "$dir"
+  # 容器兜底删除：目录里可能躺着容器内 root 写出的文件（nginx 配置提取、
+  # mysql chown 等），宿主 rm 对它们无权限；直接 rm 失败会让重装卡在半路
+  _rm_rf_with_docker_fallback "$dir"
   log "初始化 $svc $ver 配置..."
   mkdir -p "$dir"
 

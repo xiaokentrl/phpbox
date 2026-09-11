@@ -31,7 +31,7 @@ _redis_install() {
   fi
   # 镜像获取走离线事务（offline/redis/<版本>/ 命中则零网络），
   # 必须在 _generic_service_install 之前：容器启动依赖镜像已在本地
-  _redis_ensure_image "$ver" "install"
+  _redis_ensure_image "$ver" "install" >/dev/null   # stdout 的镜像名无人捕获，吞掉防终端污染
   _generic_service_install "redis" "$ver" "6379" "$@"
 }
 
