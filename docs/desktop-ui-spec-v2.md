@@ -149,6 +149,8 @@
 
 每个视图四态：**正常 / 空态 / daemon 不可达（顶部横幅+重试）/ 长操作中（该操作面板锁定，切页不中断）**。
 
+窗口规格：最小尺寸 1024×680；宽度低于 1200 时侧边导航收缩为图标模式（悬停展开文字）；任务抽屉与弹窗栈挂载于 App 根组件（由全局 store 驱动），**切页不重新挂载、任务状态不丢失**。
+
 ---
 
 ## 5. 核心流程（9 条，Mermaid）
@@ -341,11 +343,52 @@ meta: { connected, lastSyncAt }（全局响应式）
 | success | 完全关闭 | 是 |
 | failed | 保留 + 诊断入口 | 是（建议先处理） |
 
+**挂载位置约束**：任务抽屉渲染在 App 根组件层级（非各面板内部），状态唯一来源为全局 tasks store——切页仅切换主内容区，抽屉不卸载。
+
 **陈旧锁恢复**（双方原方案均缺，补全）：应用启动时向引擎查询任务锁状态；发现上次任务中断 → 通知中心提示"上次任务中断于 <阶段>" → 提供半安装清理入口（复用引擎回滚清理，只清本次新增、不碰既有状态——与 bash 回滚快照语义一致）。引擎侧锁文件与查询接口列入 §10 待实现。
 
 ### 6.4 弹窗栈
 
 层级 0 无 → 层级 1 主弹窗（安装/卸载/新建站点）→ 层级 2 危险确认。Esc 关最上层；层级 1 关闭回面板，层级 2 关闭回层级 1。
+
+### 6.5 核心数据类型（前端视角）
+
+类型源头是 Go 结构体经 Wails 生成的 `frontend/wailsjs/.../models.ts`（勿手改）；以下为 UI 消费的等价 TS 定义（补 UI 派生字段）：
+
+```typescript
+export type EngineState =
+  | 'absent' | 'preparing' | 'configured' | 'starting'
+  | 'healthy' | 'committed' | 'failed' | 'rolling_back' | 'rolled_back';
+
+export type ServiceKind = 'php' | 'mysql' | 'pgsql' | 'redis' | 'nginx' | 'go';
+
+export interface ServiceInstance {
+  kind: ServiceKind;
+  version: string;
+  state: EngineState;          // §8 对照表驱动徽章
+  port?: number;               // go/php 线可无宿主端口
+  containerName: string;
+  configPath: string;
+  dataPath?: string;           // 数据库线
+  passwordKey?: string;        // .env 键名（值不进前端，经专用 reveal 绑定按需取）
+}
+
+export interface SiteEntry {
+  domain: string;
+  phpVersion: string | null;   // null = 绑定的 PHP 已卸载（§3.1 错误态）
+  hostAdded: boolean;
+  health: 'up' | 'degraded' | 'down' | 'unknown';
+  rootPath: string;
+}
+
+export interface TaskState {
+  id: string;
+  label: string;
+  cliPreview: string;          // 命令透明化：等价 CLI（原则 2）
+  phase: EngineState | 'running';
+  lines: LogLine[];            // 超过 5000 行截断保留尾部
+}
+```
 
 ---
 
@@ -402,7 +445,20 @@ meta: { connected, lastSyncAt }（全局响应式）
 | rolling_back | 红脉冲 | 回滚中 | 查看 |
 | rolled_back | 灰 | 已还原（旧状态保留） | 重试安装 |
 
-阶段 0（bash 引擎）状态由日志行推断（`[OK]`/`[ERR]`/阶段关键词）；Go 引擎落地后改为原生状态事件。日志推断失败时 UI 降级显示原始日志，不臆造状态。
+阶段 0（bash 引擎）状态由日志行推断；Go 引擎落地后改为原生状态事件。日志推断失败时 UI 降级显示原始日志，不臆造状态。
+
+**日志格式契约**：bash 引擎侧冻结标记集（`[INFO]`/`[OK]`/`[ERR]`/`[WARN]` + 阶段关键词，见 §10.1）；解析规则实现为 bindings 层的**可配置映射表**（模式→状态），bash 输出演进时改表不改码。
+
+### 8.1 已知故障模式库（诊断面板数据源）
+
+| 模式 | 检测条件（阶段 0 = 日志模式匹配） | 一键修复动作 | CLI 兜底 |
+| --- | --- | --- | --- |
+| mysql/pgsql sock 残留 crash loop | restart 循环 + 日志含 "Operation not permitted" 且涉及 .sock | 清理数据目录残留 socket → 重新 up | `phpbox <svc> uninstall` 后重装 |
+| nginx 配置属主异常 | `[ERR]` 含 "权限不够" 且路径含 config/nginx | 容器治愈属主 → 重新生成配置 | `sudo chown` 手动 |
+| 端口被占 | compose up 报 bind failed / 占用报告 | `port set` 迁移到空闲端口 | `phpbox <svc> port set` |
+| PHP 容器异常致站点 502 | 站点 5xx + php 实例非 healthy | 重启实例 → 无效则重建镜像 | `phpbox php list` 排查 |
+| 镜像缺失/损坏 | image inspect 失败且离线命中失败 | 三段决策重取（离线/在线） | 重装对应服务 |
+| 离线闭包版本漂移 | 离线构建报 breaks 依赖冲突 | 联网重取闭包（basesync）后重建 | 联网重试一次 |
 
 ---
 
@@ -410,7 +466,7 @@ meta: { connected, lastSyncAt }（全局响应式）
 
 | 阶段 | UI 交付 | 引擎前提 |
 | --- | --- | --- |
-| v0.1 可用（MVP） | Onboarding · 总览 · 安装向导 · 实例详情/连接抽屉 · 站点列表(含创建/切换) · 任务抽屉 · 设置基础 | 引擎 = bash spawn；状态日志推断 |
+| v0.1 可用（MVP） | Onboarding · 总览 · 安装向导 · 实例详情/连接抽屉 · 站点列表(含创建/切换) · 任务抽屉 · 设置基础 · **i18n 脚手架**（t()+JSON 文案文件，v0.1 仅发布中文，避免后期全量替换文案） | 引擎 = bash spawn；状态日志推断 |
 | v1.0 好用 | 备份恢复全流程 · 扩展增删 · Go 线 · 快捷键/命令面板 · 通知中心 | bash 引擎不变；绑定层稳定 |
 | v1.1 生产级 | 离线缓存管理页 · 诊断面板(一键修复模式库) · 站点健康探测 · i18n 中英 · 导出诊断包 | **Go 引擎**：§10 待实现项逐个落地 |
 | v2 | 托盘（随 Wails v3） · 嵌入式终端(xterm.js+PTY) · 多机管理 | 引擎 server 模式（Gin 适配层挂 `cmd/phpboxd`） |
@@ -421,11 +477,11 @@ meta: { connected, lastSyncAt }（全局响应式）
 
 | 能力 | 消费方 | 归宿 |
 | --- | --- | --- |
-| 离线缓存 list / verify / prune | 离线缓存页 | Go 引擎 `internal/engine/offline`（preload 已在 docker.sh 预留，转正于此） |
+| 离线缓存 list / verify / prune | 离线缓存页 | Go 引擎 `internal/engine/offline`（实现顺序：verify → prune → preload，preload 已在 docker.sh 预留转正于此） |
 | 任务锁状态查询 + 陈旧锁清理 | 任务中心 §6.3 | Go 引擎 `internal/engine/transaction` |
 | 原生状态事件（九态推送） | 全部状态徽章 | Go 引擎 eventbus（阶段 0 用日志推断降级） |
 | 导出诊断包（日志+配置+版本信息） | 诊断面板 | Go 引擎 |
-| 站点健康 HEAD 探测 | 站点页徽章 | 引擎或前端直连（本机 HTTP，无需引擎；v1.1 定） |
+| 站点健康 HEAD 探测 | 站点页徽章 | **Go 侧探测**（`internal/engine/health`，net/http）——WebView 内 fetch 受 CORS 限制读不到状态码，必须经绑定返回结构化结果 |
 
 ---
 
@@ -446,6 +502,14 @@ meta: { connected, lastSyncAt }（全局响应式）
 ### 11.4 补全双方共同缺失
 
 PostgreSQL 服务线（B 导航缺）· 设置页（B 缺）· 离线缓存页（B 缺）· 任务陈旧锁恢复（双方缺）· i18n 从阶段三提前到 v1.1（README 本就双语）· 引擎待实现依赖清单（§10，防 UI 承诺无引擎支撑）
+
+### 11.6 外部评审裁决（第二轮，2026-09-13）
+
+采纳：日志格式契约 + 可配置映射表（§8）· 已知故障模式库（§8.1）· 站点健康改 Go 侧探测（CORS 论证成立，§10）· verify/prune 先于 preload（§10）· 任务抽屉全局挂载约束（§4/§6.3）· v0.1 引入 i18n 脚手架（§9）· 最小窗口 1024×680 与导航收缩（§4）· 核心 TS 类型定义（§6.5，修正其 status 枚举为九态、kind 补 go）· 导出/导入数据已在上轮吸收。
+
+拒绝（两项，含事实纠正）：
+1. **"主选切换 Wails v3 Beta"**——前提不成立：其论据"托盘是 v1.0 硬需求"误读本文档，托盘在 §9 中属 v2 阶段且 v1 期以最小化到任务栏替代；ADR-001 §6 触发器 3 已覆盖"托盘等 v2 无法满足的硬需求提前出现"的情形，届时按有界迁移评估。其"systray 生命周期问题"的技术判断本身准确，予以记录。
+2. **"PostgreSQL 降级到 v1.1+ 并在 §10 标注引擎待新增"**——事实错误：bash 引擎已完整支持 pgsql（lib/pgsql/ 五文件，安装/卸载/离线事务/备份集成均已端到端验证），§10 未列 pgsql 恰因引擎已具备。其建议中"移植状态表跟踪"的合理部分由既定的 `docs/migration.md` 计划承担（所有线的 Go 移植统一跟踪，非 pgsql 特有）。
 
 ### 11.5 准确性声明
 
