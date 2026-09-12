@@ -41,6 +41,10 @@ cmd_backup() {
   if [ -d "$MYSQL_DATA_ROOT" ]; then
     backup_items+=("$MYSQL_DATA_ROOT")
   fi
+  # PostgreSQL 数据目录（宿主机路径；与 mysql 同一打包机制）
+  if [ -d "$PGSQL_DATA_ROOT" ]; then
+    backup_items+=("$PGSQL_DATA_ROOT")
+  fi
 
   for vf in "$tmpd"/*.tar.gz; do
     [ -f "$vf" ] || continue   # glob 无匹配时保持字面串，靠 -f 过滤掉

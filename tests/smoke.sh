@@ -40,6 +40,7 @@ if command -v docker &>/dev/null && docker info &>/dev/null; then
   run "php list 命令"     "已安装 PHP 版本"   php list
   run "mysql list 命令"   "已安装 MySQL 版本" mysql list
   run "redis list 命令"   "已安装 Redis 版本" redis list
+  run "pgsql list 命令"   "已安装 PostgreSQL 版本" pgsql list
   # APK 下载器脚本（优化切片 B 实体化）：用其实际运行解释器 busybox sh 做语法门禁——
   # bash -n 与 busybox 语法面不完全重合，且顺带验证只读挂载路径成立
   if timeout 60 docker run --rm \

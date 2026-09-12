@@ -3,7 +3,7 @@
 ## 1. 项目定位
 
 - **项目类型**：纯 Bash 实现的本地 Docker LNMP 多版本开发环境管理器。
-- **核心服务**：PHP、MySQL、Redis、Nginx、Go，以及站点和 hosts 管理。
+- **核心服务**：PHP、MySQL、PostgreSQL、Redis、Nginx、Go，以及站点和 hosts管理。
 - **运行边界**：只面向本地开发，不作为生产部署系统。
 - **首要目标**：可查阅、可恢复、可重复安装、长操作有反馈、失败不破坏旧状态。
 - **技术栈**：Bash 4.4+、Docker、Docker Compose、Alpine APK、PECL、Shell 脚本测试。
@@ -96,7 +96,7 @@ absent -> preparing -> configured -> starting -> healthy -> committed
 - 每个状态必须说明检测依据、允许的下一状态、中断恢复方式和孤儿资源清理方式。
 - 提交前不得删除旧配置、旧容器、旧镜像、旧数据卷或旧缓存。
 - 每个 CLI 命令必须定义参数、默认值、兼容别名、修改资源、幂等行为和稳定错误分类。
-- `mysql install` / `redis install` / `nginx install` 获取官方镜像走公共离线事务（`lib/common/docker.sh` 的 `_ensure_offline_image`，各线 `common/offline.sh` 只做薄绑定）：优先命中 `offline/<服务>/<版本>/<服务>-<版本>.tar`（`docker load` 零网络），未命中才 `docker pull` 并在拉取成功后回写离线库（临时文件 + tar 可读性校验 + 原子替换；回写失败仅告警不中断安装）。load 后镜像名与版本目录不匹配必须报错，禁止静默回退在线路径绕过离线契约。redis 的镜像 tag 带后缀（`redis:8-alpine`）而离线库目录用裸版本号，公共层因此把版本与 tag 分开传参。
+- `mysql install` / `pgsql install` / `redis install` / `nginx install` 获取官方镜像走公共离线事务（`lib/common/docker.sh` 的 `_ensure_offline_image`，各线 `common/offline.sh` 只做薄绑定）：优先命中 `offline/<服务>/<版本>/<服务>-<版本>.tar`（`docker load` 零网络），未命中才 `docker pull` 并在拉取成功后回写离线库（临时文件 + tar 可读性校验 + 原子替换；回写失败仅告警不中断安装）。load 后镜像名与版本目录不匹配必须报错，禁止静默回退在线路径绕过离线契约。redis/pgsql 的镜像 tag 带后缀（`redis:8-alpine`、`postgres:17-alpine`）而离线库目录用裸版本号，公共层因此把版本与 tag 分开传参。
 - `redis install` 省略版本时使用官方最新稳定主版本 `8`（镜像 tag `redis:8-alpine`）；省略 `--port` 时使用 Redis 默认端口 `6379`；安装完成必须像 MySQL 一样把端口和认证密码持久化到 `.env`，密码键为 `REDIS_<去点版本>_ROOT_PASSWORD`。显式版本和端口必须原样校验并使用。
 - Redis 每个版本必须生成并挂载本地可编辑配置 `config/redis/<版本>/redis.conf`；Compose 以只读方式挂载该文件，安装/重建不得用镜像内默认配置替代本地配置。密码继续只保存在 `.env`，不得写入 `redis.conf`。
 - stdout 只输出调用方需要捕获的结果；stderr 输出进度、警告、诊断、失败和回滚信息。
@@ -152,6 +152,7 @@ phpbox/
 │   ├── cli.sh                    # 命令路由实现与全局命令（show_help/cmd_list）
 │   ├── php/                      # PHP 线：common/{install,build,extensions,config}.sh + cli.sh + versions/
 │   ├── mysql/                    # MySQL 线：common/{install,offline,port,config}.sh + cli.sh + versions/
+│   ├── pgsql/                    # PostgreSQL 线：common/{install,offline,port,config}.sh + cli.sh
 │   ├── redis/                    # Redis 线：common/{install,offline,port,config}.sh + cli.sh + versions/
 │   ├── nginx/                    # Nginx 线：common/{install,offline,reload,config}.sh + cli.sh + versions/
 │   ├── site/                     # site 线：common/{add,switch,list,hosts}.sh + cli.sh
@@ -166,7 +167,7 @@ phpbox/
 │   └── php/<版本>/
 ├── cache/go/<版本>/              # Go GOPATH 模块和工具缓存
 ├── offline/php/<版本>/           # 已验证的 APK/PECL 离线缓存
-├── offline/{mysql,redis}/<版本>/   # 已拉取验证的官方镜像 tar（docker load 零网络安装）
+├── offline/{mysql,redis,pgsql}/<版本>/   # 已拉取验证的官方镜像 tar（docker load 零网络安装）
 ├── offline/nginx/<tag>/            # 同上（目录名用镜像 tag，如 alpine）
 ├── logs/                         # Nginx 和 PHP 日志
 ├── backups/                      # 备份归档
@@ -256,7 +257,7 @@ bin/phpbox（薄入口：加载链 + 转调）
 - `bin/phpbox` 只负责 bash 守护、固定顺序加载和转调 `lib/cli.sh`，不实现业务规则；命令路由、Docker 预检分发和帮助文本在 `lib/cli.sh`。
 - `lib/common/` 六件套只提供环境、日志、路径、端口、Docker 调用和配置持久化基础设施；`lib/common/install.sh` 提供安装事务与回滚框架。全局公共层不得持续吸收具体服务的业务逻辑。
 - `lib/php/common/build.sh` 负责 PHP 构建编排与 Dockerfile 渲染；`lib/php/common/offline.sh` 负责 APK/PECL 离线资产事务（暂存、闭包校验、晋升、丢弃）；`lib/php/common/apk-fetch.sh` 负责 APK 容器下载器。三者应保持可分辨的函数边界，下载、校验、晋升、清理和回滚不得堆叠回同一函数。
-- `lib/php/`、`lib/mysql/`、`lib/redis/`、`lib/nginx/`、`lib/site/`、`lib/go/`、`lib/backup/` 各线只负责各自领域；不得反向调用 CLI 入口，不得依赖其他业务线的私有函数，也不得在全局 common 存放本线业务。
+- `lib/php/`、`lib/mysql/`、`lib/pgsql/`、`lib/redis/`、`lib/nginx/`、`lib/site/`、`lib/go/`、`lib/backup/` 各线只负责各自领域；不得反向调用 CLI 入口，不得依赖其他业务线的私有函数，也不得在全局 common 存放本线业务。
 - 跨模块调用必须通过公共函数或明确的回调契约；不得依赖文件加载顺序提供隐式函数。
 - 生成配置必须先写临时文件并校验，成功后原子替换正式文件；运行期生成物不得被当作源码维护。
 - 同一生命周期模式只保留一个公共实现：预检 -> 准备 -> 执行 -> 健康检查 -> 提交/回滚。

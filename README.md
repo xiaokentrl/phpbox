@@ -4,7 +4,7 @@
 
 多版本 Docker 开发环境管理器（LNMP + Go）。纯 Bash 实现，一条命令装好 PHP / MySQL / Redis / Nginx：多版本共存、随时切换、互不干扰；构建支持离线缓存，断网也能重装；每个长操作都有阶段日志、超时边界和失败回滚。
 
-- 多版本 PHP（5.6/7.x/8.x）、MySQL、Redis、Go 共存，随装随用
+- 多版本 PHP（5.6/7.x/8.x）、MySQL、PostgreSQL、Redis、Go 共存，随装随用
 - 站点一键绑定域名 + PHP 版本，`site switch` 秒切版本
 - Go 项目按 `go.mod` 自动发现，无需通过 phpbox 创建
 - APK/PECL 构建依赖离线缓存（`offline/`），命中即零网络构建
@@ -31,6 +31,7 @@ bash install.sh
 phpbox php install 8.4                  # 装 PHP 8.4（默认扩展集见 .env）
 phpbox nginx install                    # 装 Nginx（默认 80 端口）
 phpbox mysql install 8.4                # 装 MySQL（完成后显示 root 密码）
+phpbox pgsql install 17                 # 装 PostgreSQL（完成后显示密码）
 phpbox redis install                    # 装 Redis 8（默认端口 6379）
 phpbox site add demo.test --php 8.4     # 创建站点
 phpbox hosts add demo.test              # 域名解析（需 sudo）
@@ -64,7 +65,7 @@ phpbox php install 8.4 --ext gd,redis  # 全新安装时直接指定扩展集
 
 ### 场景 3：断网重装 / 换机迁移
 
-只要 `offline/` 里有已验证的资产（PHP：`php/<版本>/` 的 APK 闭包 + PECL 包；MySQL/Redis/Nginx：`mysql/<版本>/`、`redis/<版本>/`、`nginx/<tag>/` 镜像 tar——首次安装自动回写），断网也能完整重装：
+只要 `offline/` 里有已验证的资产（PHP：`php/<版本>/` 的 APK 闭包 + PECL 包；MySQL/PostgreSQL/Redis/Nginx：`mysql/<版本>/`、`pgsql/<版本>/`、`redis/<版本>/`、`nginx/<tag>/` 镜像 tar——首次安装自动回写），断网也能完整重装：
 
 ```bash
 phpbox php uninstall 8.4
@@ -114,6 +115,15 @@ Go 容器源码挂 `/workspace`、按版本持久化 GOPATH 缓存，不发布�
 | `phpbox mysql port set <版本> <新端口>` | 修改端口（失败自动回滚） |
 | `phpbox mysql list` | 列出所有 MySQL 实例 |
 | `phpbox mysql uninstall <版本> [--purge]` | 卸载（`--purge` 连同数据目录清除） |
+
+### PostgreSQL
+
+| 命令 | 说明 |
+| --- | --- |
+| `phpbox pgsql install <版本> [--port 端口]` | 安装 PostgreSQL（镜像优先走 `offline/pgsql/<版本>/` 离线命中），完成后显示密码（存入 `.env`） |
+| `phpbox pgsql port set <版本> <新端口>` | 修改端口（失败自动回滚） |
+| `phpbox pgsql list` | 列出所有 PostgreSQL 实例 |
+| `phpbox pgsql uninstall <版本> [--purge]` | 卸载（`--purge` 连同数据目录清除） |
 
 ### Redis
 
@@ -196,6 +206,8 @@ phpbox go logs / stop / env <项目>
 | `PHP_DEFAULT_EXTENSIONS` | 见 `.env.example` | `php install` 不带 `--ext` 时的默认扩展集 |
 | `MYSQL_<去点版本>_PORT` / `MYSQL_<去点版本>_ROOT_PASSWORD` | 自动分配 / 自动生成 | 如 `MYSQL_84_PORT`、`MYSQL_84_ROOT_PASSWORD`；安装前预置即生效 |
 | `REDIS_<去点版本>_PORT` / `REDIS_<去点版本>_ROOT_PASSWORD` | `6379` / 自动生成 | 如 `REDIS_8_PORT`；redis 安装完成后自动写入 |
+| `PGSQL_DATA_ROOT` | `~/pgsql-data` | PostgreSQL 数据主目录（每版本一个子目录） |
+| `PGSQL_<去点版本>_PORT` / `PGSQL_<去点版本>_ROOT_PASSWORD` | `5432` / 自动生成 | 如 `PGSQL_17_PORT`；pgsql 安装完成后自动写入 |
 | `APK_MIRRORS` | 阿里云 + 官方源 | Alpine 镜像源列表（空格分隔，测速排序，超时切换） |
 | `APK_TIMEOUT` | `30` | 镜像源网络超时秒数（测速/索引/无响应判定共用） |
 | `BUILD_PROXY` | `auto` | 构建代理：`auto`=探测本地代理端口；`none`=禁用；或 `host:port` |
@@ -218,6 +230,7 @@ $HOME/phpbox/
 │   ├── cli.sh                    # 命令路由实现与全局命令（help/list）
 │   ├── php/                       # PHP 线：common/{install,extensions,apk-fetch,offline,build,config} + versions/ + cli.sh
 │   ├── mysql/                     # MySQL 线：common/{install,offline,port,config} + versions/ + cli.sh
+│   ├── pgsql/                     # PostgreSQL 线：common/{install,offline,port,config} + cli.sh
 │   ├── redis/                     # Redis 线：common/{install,port,config} + versions/ + cli.sh
 │   ├── nginx/                     # Nginx 线：common/{install,reload,config} + versions/ + cli.sh
 │   ├── site/                      # 站点与 hosts：common/{add,switch,list,hosts} + cli.sh
@@ -227,7 +240,7 @@ $HOME/phpbox/
 │   ├── docker-compose.yml        # 主 compose（仅定义共享网络）
 │   └── services/                 # 每个服务版本一个 yml 分片（如 php-8.4.yml）
 ├── config/                       # 各服务版本配置与 PHP 扩展清单
-├── offline/                      # 离线缓存（php/<版本>/apk+pecl/；mysql、redis/<版本>/ 与 nginx/<tag>/ 镜像 tar）
+├── offline/                      # 离线缓存（php/<版本>/apk+pecl/；mysql、pgsql、redis/<版本>/ 与 nginx/<tag>/ 镜像 tar）
 ├── cache/go/<版本>/               # Go GOPATH 模块和工具缓存
 ├── backups/                      # 备份归档
 ├── logs/                         # Nginx 与 PHP 日志
@@ -244,7 +257,7 @@ $HOME/phpbox/
 | `config/mysql/*/my.cnf`、`config/nginx/*/{nginx.conf,conf.d/}`、`config/redis/*/redis.conf` | 首次安装时从镜像提取或生成，用户可直接修改 |
 | `config/nginx/sites/*.conf` | `site add` |
 | `config/php/*/extensions.env`、`logs/*.log`、`backups/*.tar.gz` | 安装过程与运行期 |
-| `offline/`（php 构建闭包 + mysql/redis 镜像 tar）、`cache/go/` | 构建验证成功后自动晋升 / 镜像拉取后回写 / Go 命令 |
+| `offline/`（php 构建闭包 + mysql/pgsql/redis 镜像 tar）、`cache/go/` | 构建验证成功后自动晋升 / 镜像拉取后回写 / Go 命令 |
 
 ## 测试与验收
 
@@ -259,7 +272,7 @@ bash tests/run.sh    # 五闸门：lint → 函数清单 → 冒烟 → offline-
 
 - **bash 版本过低**：macOS 先 `brew install bash`，再用新版运行。
 - **端口被占用**：不指定端口时自动挑空闲端口；`--port` 显式指定被占用会提示占用者。
-- **忘了数据库密码**：MySQL/Redis 密码都在 `.env`（`MYSQL_<版本>_ROOT_PASSWORD` / `REDIS_<版本>_ROOT_PASSWORD`），该文件不入仓。
+- **忘了数据库密码**：MySQL/PostgreSQL/Redis 密码都在 `.env`（`MYSQL_<版本>_ROOT_PASSWORD` / `PGSQL_<版本>_ROOT_PASSWORD` / `REDIS_<版本>_ROOT_PASSWORD`），该文件不入仓。
 - **站点打不开**：`site list` 确认站点、`hosts list` 确认解析，Nginx 非 80 端口要带端口访问。
 - **PHP 构建卡在下载**：确认 `APK_MIRRORS` 可达；网络受限配 `BUILD_PROXY` 指向本地代理。
 - **删掉配置想重来**：删对应 `config/<服务>/<版本>/` 目录，下次安装自动重新生成。
@@ -274,7 +287,7 @@ bash tests/run.sh    # 五闸门：lint → 函数清单 → 冒烟 → offline-
 
 A multi-version Docker dev-environment manager (LNMP + Go), implemented in pure Bash: install PHP / MySQL / Redis / Nginx with a single command — multiple versions coexist, switch anytime without interference. Builds are backed by an offline cache (reinstall without network), and every long operation ships with staged logs, timeouts, and rollback on failure.
 
-- Multi-version PHP (5.6/7.x/8.x), MySQL, Redis, and Go, side by side
+- Multi-version PHP (5.6/7.x/8.x), MySQL, PostgreSQL, Redis, and Go, side by side
 - One-command site scaffolding with domain + PHP version binding; `site switch` flips versions instantly
 - Go projects auto-discovered by `go.mod` — no scaffolding through phpbox
 - APK/PECL build deps cached in `offline/` — offline rebuilds with zero network
@@ -301,6 +314,7 @@ bash install.sh
 phpbox php install 8.4                  # PHP 8.4 (default extension set from .env)
 phpbox nginx install                    # Nginx (port 80 by default)
 phpbox mysql install 8.4                # MySQL (root password shown when done)
+phpbox pgsql install 17                 # PostgreSQL (password shown when done)
 phpbox redis install                    # Redis 8 (port 6379 by default)
 phpbox site add demo.test --php 8.4     # create a site
 phpbox hosts add demo.test              # domain resolution (sudo)
@@ -334,7 +348,7 @@ Extension state lives in `config/php/8.4/extensions.env`, maintained per version
 
 ### Scenario 3: reinstall offline / migrate machines
 
-As long as `offline/` holds verified assets (PHP: APK closures + PECL tarballs under `php/<version>/`; MySQL, Redis & Nginx: image tars under `mysql/<version>/`, `redis/<version>/` and `nginx/<tag>/`, auto-saved on first install), a full reinstall works with no network:
+As long as `offline/` holds verified assets (PHP: APK closures + PECL tarballs under `php/<version>/`; MySQL, PostgreSQL, Redis & Nginx: image tars under `mysql/<version>/`, `pgsql/<version>/`, `redis/<version>/` and `nginx/<tag>/`, auto-saved on first install), a full reinstall works with no network:
 
 ```bash
 phpbox php uninstall 8.4
@@ -384,6 +398,15 @@ Go containers mount sources at `/workspace`, persist GOPATH caches per version, 
 | `phpbox mysql port set <version> <new>` | Change port (auto-rollback on failure) |
 | `phpbox mysql list` | List MySQL instances |
 | `phpbox mysql uninstall <version> [--purge]` | Uninstall (`--purge` also removes the data directory) |
+
+### PostgreSQL
+
+| Command | Description |
+| --- | --- |
+| `phpbox pgsql install <version> [--port N]` | Install PostgreSQL (image prefers the `offline/pgsql/<version>/` cache); password shown and saved to `.env` |
+| `phpbox pgsql port set <version> <new>` | Change port (auto-rollback on failure) |
+| `phpbox pgsql list` | List PostgreSQL instances |
+| `phpbox pgsql uninstall <version> [--purge]` | Uninstall (`--purge` also removes the data directory) |
 
 ### Redis
 
@@ -466,6 +489,8 @@ A default `.env` is generated on first install; see `.env.example` for the full 
 | `PHP_DEFAULT_EXTENSIONS` | see `.env.example` | Default extension set when `php install` omits `--ext` |
 | `MYSQL_<dotless>_PORT` / `MYSQL_<dotless>_ROOT_PASSWORD` | auto-assigned / generated | e.g. `MYSQL_84_PORT`, `MYSQL_84_ROOT_PASSWORD`; preset before install to take effect |
 | `REDIS_<dotless>_PORT` / `REDIS_<dotless>_ROOT_PASSWORD` | `6379` / generated | e.g. `REDIS_8_PORT`; written automatically after redis install |
+| `PGSQL_DATA_ROOT` | `~/pgsql-data` | PostgreSQL data root (one subdirectory per version) |
+| `PGSQL_<dotless>_PORT` / `PGSQL_<dotless>_ROOT_PASSWORD` | `5432` / generated | e.g. `PGSQL_17_PORT`; written automatically after pgsql install |
 | `APK_MIRRORS` | Aliyun + official | Alpine mirror list (space-separated; speed-ranked, failover on timeout) |
 | `APK_TIMEOUT` | `30` | Network timeout in seconds for mirrors (speed test / index / stall detection) |
 | `BUILD_PROXY` | `auto` | Build proxy: `auto` = probe local proxy ports; `none` = disabled; or `host:port` |
@@ -486,10 +511,10 @@ $HOME/phpbox/
 ├── lib/                          # four-layer structure (see AGENTS.md §3)
 │   ├── common/                   # global layer: env/log/paths/ports/docker/config + install framework
 │   ├── cli.sh                    # command routing and global commands (help/list)
-│   ├── php/ mysql/ redis/ nginx/ site/ go/ backup/   # service lines, each with common/, versions/, cli.sh
+│   ├── php/ mysql/ pgsql/ redis/ nginx/ site/ go/ backup/  # service lines, each with common/, versions/, cli.sh
 ├── compose/                      # main compose (shared network) + per-service-version yml fragments
 ├── config/                       # per-version service configs and PHP extension manifests
-├── offline/                      # offline cache (php/<version>/apk+pecl/; mysql & redis/<version>/, nginx/<tag>/ image tars)
+├── offline/                      # offline cache (php/<version>/apk+pecl/; mysql, pgsql, redis/<version>/, nginx/<tag>/ image tars)
 ├── cache/go/<version>/           # Go GOPATH module and tool caches
 ├── backups/                      # backup archives
 ├── logs/                         # Nginx and PHP logs
@@ -506,7 +531,7 @@ The repository **tracks only sources and templates**: `bin/phpbox`, `lib/`, `ins
 | `config/mysql/*/my.cnf`, `config/nginx/*/{nginx.conf,conf.d/}`, `config/redis/*/redis.conf` | extracted from images or generated on first install; user-editable |
 | `config/nginx/sites/*.conf` | `site add` |
 | `config/php/*/extensions.env`, `logs/*.log`, `backups/*.tar.gz` | install process & runtime |
-| `offline/` (php build closures + mysql/redis image tars), `cache/go/` | promoted after verified builds / written back after image pull / Go commands |
+| `offline/` (php build closures + mysql/pgsql/redis image tars), `cache/go/` | promoted after verified builds / written back after image pull / Go commands |
 
 ## Testing
 
@@ -521,7 +546,7 @@ Behavior tests prefer controlled fakes (fake curl, sandboxed dirs) and don't req
 
 - **bash too old**: on macOS, `brew install bash` and run everything with the new one.
 - **Port in use**: a free port is picked automatically when unspecified; with `--port`, the occupying process is reported.
-- **Forgot a database password**: MySQL/Redis passwords live in `.env` (`MYSQL_<version>_ROOT_PASSWORD` / `REDIS_<version>_ROOT_PASSWORD`), which is never committed.
+- **Forgot a database password**: MySQL/PostgreSQL/Redis passwords live in `.env` (`MYSQL_<version>_ROOT_PASSWORD` / `PGSQL_<version>_ROOT_PASSWORD` / `REDIS_<version>_ROOT_PASSWORD`), which is never committed.
 - **Site unreachable**: check `site list` and `hosts list`; include the port if Nginx isn't on 80.
 - **PHP build stalls on downloads**: verify `APK_MIRRORS` reachability; set `BUILD_PROXY` to a local proxy on restricted networks.
 - **Start over with configs**: delete the matching `config/<service>/<version>/` directory; the next install regenerates it.

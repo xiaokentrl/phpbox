@@ -8,6 +8,7 @@
 #   场景 5：redis tag 变体 → redis:8-alpine 的离线库目录是裸版本号 offline/redis/8/
 #         （版本与 tag 后缀不同是公共层分参传值的原因，此断言钉住该映射）
 #   场景 6：nginx tag 别名 → 离线库目录名就是 tag 本身（alpine/1.25，非数字版本）
+#   场景 7：pgsql → postgres:17-alpine 的离线库目录是裸版本号 offline/pgsql/17/
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -72,6 +73,7 @@ export OFFLINE_DIR="$box/offline"   # 沙箱离线库，测试后随 trap 清理
 source lib/mysql/common/offline.sh  # 薄绑定：mysql:<版本>
 source lib/redis/common/offline.sh  # 薄绑定：redis:<版本>-alpine
 source lib/nginx/common/offline.sh # 薄绑定：nginx:<tag 别名>
+source lib/pgsql/common/offline.sh # 薄绑定：postgres:<版本>-alpine（与 redis 同款版本≠tag）
 
 # ---- 场景 1：镜像已在本地 → 零 load 零 pull ----
 rm -f "$FAKE_DOCKER_LOG"
@@ -167,6 +169,25 @@ unset FAKE_LOAD_IMAGE
 grep -q 'docker pull nginx:1.25' "$FAKE_DOCKER_LOG" && ok "场景6b 拉取 nginx:1.25" || bad "场景6b 未拉取正确 tag"
 ntarf="$OFFLINE_DIR/nginx/1.25/nginx-1.25.tar"
 [ -f "$ntarf" ] && ok "场景6b 回写落在 tag 目录（$ntarf）" || bad "场景6b 离线库路径错误"
+
+# ---- 场景 7：pgsql 版本≠tag（postgres:17-alpine → offline/pgsql/17/） ----
+rm -f "$FAKE_DOCKER_LOG"; : > "$FAKE_LOADED_STATE"
+mkdir -p "$OFFLINE_DIR/pgsql/17"
+echo fake-tar-body > "$OFFLINE_DIR/pgsql/17/pgsql-17.tar"
+export FAKE_LOAD_IMAGE="postgres:17-alpine"
+out=$(_pgsql_ensure_image "17" "install" 2>"$box/s7.log")
+[ "$out" = "postgres:17-alpine" ] && ok "场景7 pgsql 返回带 -alpine 的 tag" || bad "场景7 返回值异常: $out（$(cat "$box/s7.log")）"
+grep -q 'docker load' "$FAKE_DOCKER_LOG" && ok "场景7 命中走 docker load" || bad "场景7 未调用 load"
+if grep -q 'docker pull' "$FAKE_DOCKER_LOG"; then bad "场景7 命中仍 pull"; else ok "场景7 命中零 pull"; fi
+unset FAKE_LOAD_IMAGE
+# 未命中拉取后回写：目录必须落在裸版本号 offline/pgsql/16/
+rm -f "$FAKE_DOCKER_LOG"; : > "$FAKE_LOADED_STATE"; rm -rf "$OFFLINE_DIR/pgsql/16"
+export FAKE_LOAD_IMAGE="postgres:16-alpine"
+out=$(_pgsql_ensure_image "16" "install" 2>"$box/s7b.log")
+grep -q 'docker pull postgres:16-alpine' "$FAKE_DOCKER_LOG" && ok "场景7b 拉取 postgres:16-alpine" || bad "场景7b 未拉取正确 tag"
+ptarf="$OFFLINE_DIR/pgsql/16/pgsql-16.tar"
+[ -f "$ptarf" ] && ok "场景7b 回写落在裸版本目录（$ptarf）" || bad "场景7b 离线库路径错误"
+unset FAKE_LOAD_IMAGE
 
 echo "----------------------------------------"
 echo "image-offline: PASS=$pass FAIL=$fail"

@@ -23,6 +23,11 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
   mysql list                                 列出所有 MySQL
   mysql uninstall <版本> [--purge]           卸载 MySQL
 
+  pgsql install <版本> [--port 端口]          安装 PostgreSQL（完成后显示密码；镜像离线优先）
+  pgsql port set <版本> <新端口>              修改端口
+  pgsql list                                 列出所有 PostgreSQL
+  pgsql uninstall <版本> [--purge]           卸载 PostgreSQL
+
   redis install [<版本>] [--port 端口]        安装 Redis（默认最新稳定版 Redis 8，默认端口 6379）
   redis port set <版本> <新端口>              修改端口
   redis list                                 列出所有 Redis
@@ -62,6 +67,7 @@ ${CMD_NAME} - 多版本 Docker 开发环境管理
   WWW_ROOT        网站根目录（默认 ~/www）
   MYSQL_DATA_ROOT MySQL 数据主目录（默认$HOME/mysql-data）
   MYSQL_80_ROOT_PASSWORD  预设 MySQL 8.0 的 root 密码（安装前写入 .env 即生效，键名规则 MYSQL_<去点版本>_ROOT_PASSWORD，未预设则自动生成）
+  PGSQL_<去点版本>_ROOT_PASSWORD  PostgreSQL 密码（安装时自动生成并保存；PGSQL_<去点版本>_PORT 同规则）
   PHP_DEFAULT_EXTENSIONS  PHP 默认安装的扩展集（php install 不带 --ext 时生效，逗号分隔）
   REDIS_<去点版本>_ROOT_PASSWORD  Redis 认证密码（redis install 自动生成并保存）
   APK_MIRRORS     Alpine 镜像源兜底列表（空格分隔；使用前自动测速按最快优先下载，超时自动切换）
@@ -97,7 +103,7 @@ cmd_list() {
 # 或产生 uninstall 假成功（compose down 静默失败但 yml 被删）。
 # 豁免：help/hosts（不碰 docker）、site list（纯文件读取）、未知命令（应报"未知命令"而非 docker 错）
 case "${1:-help}" in
-    php|mysql|redis|nginx|backup|restore|list)
+    php|mysql|pgsql|redis|nginx|backup|restore|list)
         require_docker
         ;;
     go)
@@ -114,6 +120,7 @@ esac
 case "${1:-help}" in
     php)     shift; cmd_php "$@" ;;
     mysql)   shift; cmd_mysql "$@" ;;
+    pgsql)   shift; cmd_pgsql "$@" ;;
     redis)   shift; cmd_redis "$@" ;;
     go)      shift; cmd_go "$@" ;;
     nginx)   shift; cmd_nginx "$@" ;;

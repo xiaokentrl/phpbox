@@ -28,7 +28,10 @@ _install_rollback_begin() {
   local svc=$1 ver=$2 key
   _ROLLBACK_PENDING=true ; _ROLLBACK_SVC=$svc ; _ROLLBACK_VER=$ver
   if [ -d "$CONFIG_DIR/$svc/$ver" ]; then _ROLLBACK_CONFIG_EXISTED=true; fi
-  if [ -d "$MYSQL_DATA_ROOT/$ver" ]; then _ROLLBACK_DATA_EXISTED=true; fi
+  case "$svc" in
+    mysql) if [ -d "$MYSQL_DATA_ROOT/$ver" ]; then _ROLLBACK_DATA_EXISTED=true; fi ;;
+    pgsql) if [ -d "$PGSQL_DATA_ROOT/$ver" ]; then _ROLLBACK_DATA_EXISTED=true; fi ;;
+  esac
   if [ -f "$PHP_CONFIG_DIR/$ver/extensions.env" ]; then _ROLLBACK_STATE_EXISTED=true; fi
   key=$(port_key "$svc" "$ver")
   if [ -n "$(read_env_value "$key" "")" ]; then _ROLLBACK_PORT_EXISTED=true; fi
@@ -47,6 +50,8 @@ _install_rollback_run() {
   case "$svc" in
     mysql)
       if ! $_ROLLBACK_DATA_EXISTED; then _rm_rf_with_docker_fallback "$MYSQL_DATA_ROOT/$ver"; fi ;;
+    pgsql)
+      if ! $_ROLLBACK_DATA_EXISTED; then _rm_rf_with_docker_fallback "$PGSQL_DATA_ROOT/$ver"; fi ;;
     redis)
       docker volume rm -f "$(get_volume_name redis "$ver")" &>/dev/null || true ;;
     php)
@@ -73,6 +78,7 @@ init_config_files() {
     nginx) check_file="$dir/nginx.conf" ;;
     php)   check_file="$dir/php.ini" ;;
     mysql) check_file="$dir/my.cnf" ;;
+    pgsql) check_file="$dir/postgresql.conf" ;;
     redis) check_file="$dir/redis.conf" ;;
   esac
 
@@ -90,6 +96,7 @@ init_config_files() {
     nginx) _init_nginx_config "$dir" "$ver" ;;
     php)   _init_php_config "$dir" "$ver" ;;
     mysql) _init_mysql_config "$dir" "$ver" ;;
+    pgsql) _init_pgsql_config "$dir" "$ver" ;;
     redis) _init_redis_config "$dir" ;;
   esac
 
@@ -109,6 +116,7 @@ _generic_service_install() {
   case "$svc" in
     mysql) [[ "$ver" == 5.* || "$ver" == 8.* || "$ver" == 9.* ]] || error "MySQL 不存在 ${ver%%.*}.x 版本（5.7 之后直接是 8.0），可用版本线: 5.7 / 8.0 / 8.4 / 9.x" ;;
     redis) [[ "$ver" == [4-9] || "$ver" == [4-9].* ]] || error "Redis 可用版本线: 4.x / 5.x / 6.x / 7.x / 8.x" ;;
+    pgsql) [[ "$ver" =~ ^(9|1[0-8])(\.[0-9]+)?$ ]] || error "PostgreSQL 可用版本线: 9.x / 10-18（官方镜像无 6/7 大版本）" ;;
   esac
   if [ -f "$EXT_DIR/${svc}-${ver}.yml" ]; then
     error "${svc} ${ver} 已安装"
@@ -141,6 +149,7 @@ _generic_service_install() {
   init_config_files "$svc" "$ver"
   case "$svc" in
     mysql) _mysql_generate_compose "$ver"; _mysql_ensure_running "$ver" ;;
+    pgsql) _pgsql_generate_compose "$ver"; _pgsql_ensure_running "$ver" ;;
     redis)
       get_or_set_password "redis" "$ver" > /dev/null
       _redis_generate_compose "$ver"

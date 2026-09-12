@@ -26,6 +26,7 @@ _hosts_remove
 _image_offline_tar_path
 _init_mysql_config
 _init_nginx_config
+_init_pgsql_config
 _init_php_config
 _init_redis_config
 _install_rollback_begin
@@ -51,6 +52,14 @@ _nginx_port_set
 _nginx_reload
 _nginx_remove
 _nginx_validate
+_pgsql_ensure_image
+_pgsql_ensure_running
+_pgsql_generate_compose
+_pgsql_install
+_pgsql_port_set
+_pgsql_purge
+_pgsql_show_list
+_pgsql_uninstall
 _php_apk_basesync_run
 _php_apk_closure_verify
 _php_apk_prefetch_run
@@ -111,6 +120,7 @@ cmd_hosts
 cmd_list
 cmd_mysql
 cmd_nginx
+cmd_pgsql
 cmd_php
 cmd_redis
 cmd_restore
