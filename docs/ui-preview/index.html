@@ -245,9 +245,9 @@ const state = {
   ports: { 'mysql.8.4':'3384','mysql.8.0':'3380','mysql.5.7':'3357','pgsql.17':'5432','redis.8':'6380','nginx.alpine':'80' },
   passwords: { 'mysql.8.4':'demo-pass-84','mysql.8.0':'demo-pass-80','mysql.5.7':'demo-pass-57','pgsql.17':'demo-pass-17','redis.8':'demo-pass-08' },
   sites: [
-    { domain:'shop.test',   php:'8.4', root:'~/www/shop',  hosts:true,  health:'up'   },
-    { domain:'legacy.test', php:'7.4', root:'~/www/legacy',hosts:true,  health:'down' },
-    { domain:'api.test',    php:'8.4', root:'~/www/api',   hosts:false, health:'warn' },
+    { domain:'shop.test',   php:'8.4', root:'~/www/shop',  hosts:true,  health:'up',   rewrite:'Laravel'  },
+    { domain:'legacy.test', php:'7.4', root:'~/www/legacy',hosts:true,  health:'down', rewrite:null       },
+    { domain:'api.test',    php:'8.4', root:'~/www/api',   hosts:false, health:'warn', rewrite:'ThinkPHP' },
   ],
   go: [
     { name:'my-app',   version:'alpine', port:8080, status:'stopped' },
@@ -366,12 +366,14 @@ function renderSites(){
     const stale=!phpVers.includes(s.php);
     const opts=[...new Set([...phpVers,s.php])].sort(cmpVer).map(v=>`<option value="${esc(v)}"${v===s.php?' selected':''}>${esc(v)}${phpVers.includes(v)?'':'（已卸载）'}</option>`).join('');
     return `<tr>
-      <td><a class="site-domain" href="${esc(url)}" target="_blank" rel="noopener"><span class="favicon">${esc(initial)}</span>${esc(s.domain)}</a></td>
+      <td style="white-space:nowrap"><a class="site-domain" href="${esc(url)}" target="_blank" rel="noopener"><span class="favicon">${esc(initial)}</span>${esc(s.domain)}</a>${s.rewrite?` <span class="chip chip-accent" title="已配置伪静态: ${esc(s.rewrite)}">${esc(s.rewrite)}</span>`:''}</td>
       <td><select class="php-select" data-switch="${esc(s.domain)}"${stale?' style="color:var(--warn)"':''}>${opts}</select></td>
       <td><button class="path-btn" data-action="copy" data-copy="${esc(s.root)}" title="点击复制路径"><span class="path-text">${esc(s.root)}</span></button></td>
       <td>${health}</td>
       <td>${s.hosts?'<span class="chip chip-accent">已解析</span>':`<button class="btn btn-sm" data-action="hosts-add" data-domain="${esc(s.domain)}">加 hosts</button>`}</td>
-      <td><div class="row-actions"><button class="icon-btn" title="删除站点" data-action="site-remove" data-domain="${esc(s.domain)}">
+      <td><div class="row-actions"><button class="icon-btn" title="日志与伪静态" data-action="site-logs" data-domain="${esc(s.domain)}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      </button><button class="icon-btn" title="删除站点" data-action="site-remove" data-domain="${esc(s.domain)}">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/></svg></button></div></td></tr>`;
   }).join('');
   return `<div class="view-inner">${header}
@@ -397,7 +399,8 @@ function versionCard(kind,v){
   const port=state.ports[`${kind}.${v}`]||'';
   const extras=[];
   if(port) extras.push(`<div class="kv"><span class="k">端口</span><span class="v">${esc(port)}</span></div>`);
-  if(kind==='php') extras.push(`<div class="kv"><span class="k">扩展</span><span class="v">${PHP_EXTS.length} 个</span></div>`);
+  if(kind==='php'){const en=(state.phpExts&&state.phpExts[v])?state.phpExts[v].enabled.length:PHP_EXTS.length;
+    extras.push(`<div class="kv"><span class="k">扩展</span><span class="v">${en} 个</span></div>`);}
   if(kind==='mysql'||kind==='pgsql'){
     const key=`${kind}.${v}`, masked=state.passwords[key]?'••••••••':'—';
     extras.push(`<div class="kv"><span class="k">密码</span><span class="v" id="pw-${kind}-${v.replace('.','')}">${masked}</span></div>`);
@@ -444,6 +447,7 @@ function renderBackup(){
     <td><span class="mono" style="color:var(--text-dim)">${esc(b.size)}</span></td>
     <td><span class="mono" style="color:var(--text-mute);font-size:12px">${esc(b.at)}</span></td>
     <td><div class="row-actions"><button class="btn btn-sm" data-action="restore" data-file="${esc(b.file)}">恢复</button>
+    <button class="btn btn-sm" data-action="download-archive" data-file="${esc(b.file)}" data-size="${esc(b.size)}">下载</button>
     <button class="btn btn-sm btn-danger" data-action="backup-del" data-file="${esc(b.file)}">删除</button></div></td></tr>`).join('');
   return `<div class="view-inner">
     <header class="view-header"><div><h1>备份恢复</h1><p class="view-sub">打包 .env、config/、离线缓存、站点源码与数据库数据（容器打包·保留 uid 属主）</p></div>
@@ -520,6 +524,77 @@ function renderOverview(){
     <div class="table-wrap"><table><thead><tr><th style="width:22%">服务</th><th style="width:14%">版本</th><th style="width:16%">状态</th><th style="width:14%">端口</th><th style="width:20%">容器</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
+const REWRITES={
+  'ThinkPHP':   {sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
+  'Laravel':    {sub:'public', rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
+  'Yii':        {sub:'web',rule:"location / {\n  try_files $uri $uri/ /index.php?$args;\n}"},
+  'ThinkCMF':   {sub:'public', rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
+  'CodeIgniter':{sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?/$query_string;\n}"},
+  'WordPress':  {sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?$args;\n}"},
+};
+function openSiteLogsModal(domain){
+  const site=state.sites.find(x=>x.domain===domain); if(!site) return;
+  openModal(`<div class="modal" style="max-width:660px"><div class="modal-head"><h3>站点 · ${esc(domain)}</h3><p>运行日志与伪静态配置</p></div>
+    <div class="modal-body">
+      <div class="quick-picks" id="log-tabs">
+        <button class="pick selected" data-tab="log">运行日志</button>
+        <button class="pick" data-tab="rewrite">伪静态配置</button>
+      </div>
+      <div id="log-pane">
+        <div class="cmd-preview" style="max-height:240px;overflow-y:auto" id="log-view"></div>
+        <div class="hint" style="margin-top:6px">logs/nginx/${esc(domain)}.access.log · ${esc(domain)}.error.log（桌面版实时流式）</div>
+      </div>
+      <div id="rw-pane" style="display:none">
+        <div class="field"><label>当前状态</label>
+        <div class="cmd-preview">${site.rewrite?`已配置：<b>${esc(site.rewrite)}</b>`:'未配置伪静态（纯静态/直连 PHP）'}</div></div>
+        <div class="field"><label>选择框架（自动生成 rewrite 并重载）</label>
+        <div class="quick-picks" id="rw-picks">${Object.keys(REWRITES).map(f=>`<button class="pick${site.rewrite===f?' selected':''}" data-fw="${esc(f)}">${esc(f)}</button>`).join('')}</div></div>
+        <div class="field"><label>将写入 vhost</label><div class="cmd-preview" id="rw-preview"></div>
+        <div class="hint" id="rw-note"></div></div>
+      </div></div>
+    <div class="modal-foot"><button class="btn" data-modal-close>关闭</button><button class="btn btn-primary" id="rw-apply" style="display:none">应用伪静态</button></div></div>`);
+  const ACCESS=['[13/Sep/2026:10:14:01 +0800] "GET / HTTP/1.1" 200 5123 "-" "Mozilla/5.0"',
+    '[13/Sep/2026:10:14:05 +0800] "GET /static/app.js HTTP/1.1" 200 18244',
+    '[13/Sep/2026:10:15:22 +0800] "POST /api/login HTTP/1.1" 200 89',
+    '[13/Sep/2026:10:16:40 +0800] "GET /favicon.ico HTTP/1.1" 404 153'];
+  const ERROR=['[13/Sep/2026:10:14:03] PHP Notice: Undefined index: lang in /var/www/index.php on line 42',
+    '[13/Sep/2026:10:16:41] PHP Deprecated: The behavior of implicit nullable types is deprecated'];
+  const showLog=()=>{$('#log-view').innerHTML=[...ACCESS.map(l=>`<div>${esc(l)}</div>`),...ERROR.map(l=>`<div style="color:var(--warn)">${esc(l)}</div>`)].join('')};
+  let pickFw=site.rewrite;
+  const showRw=()=>{
+    const r=pickFw?REWRITES[pickFw]:null;
+    $('#rw-preview').innerHTML=r?`<span style="color:var(--text-mute)"># ${esc(pickFw)} 伪静态${r.sub?`（root 建议指向 ${r.sub}/）`:''}</span>\n${esc(r.rule)}`:'<span style="color:var(--text-mute)">未选择框架</span>';
+    $('#rw-note').textContent=pickFw&&REWRITES[pickFw].sub?`注意：${pickFw} 入口在 ${REWRITES[pickFw].sub}/ 子目录，应用后站点根目录将指向 ${site.root}/${REWRITES[pickFw].sub}/`:'';
+    $('#rw-apply').style.display=pickFw&&pickFw!==site.rewrite?'inline-flex':'none';
+  };
+  $('#log-tabs').onclick=e=>{const b=e.target.closest('[data-tab]');if(!b)return;
+    $$('#log-tabs .pick').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');
+    const tab=b.dataset.tab;
+    $('#log-pane').style.display=tab==='log'?'':'none';$('#rw-pane').style.display=tab==='rewrite'?'':'none';
+    $('#rw-apply').style.display=(tab==='rewrite'&&pickFw&&pickFw!==site.rewrite)?'inline-flex':'none';};
+  showLog();showRw();
+  $('#rw-picks').onclick=e=>{const b=e.target.closest('[data-fw]');if(!b)return;
+    $$('#rw-picks .pick').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');pickFw=b.dataset.fw;showRw();};
+  $('#modal-root').onkeydown=e=>{if(e.key==='Escape')closeModal()};
+  $('#rw-apply').addEventListener('click',()=>{
+    const fw=pickFw,r=REWRITES[fw];
+    closeModal();
+    runTask(`应用伪静态 ${fw} · ${domain}`,`phpbox site rewrite ${domain} --framework ${fw}`,
+      [{d:400,lines:[{t:`[INFO] 写入 vhost rewrite 块（${fw}${r.sub?` · root → ${r.sub}/`:''}）`,c:''}]},
+       {d:500,lines:[{t:'[INFO] nginx -t 校验',c:'dim'},{t:'[OK] 校验通过',c:'ok'}]},
+       {d:400,lines:[{t:'[INFO] reload nginx',c:'dim'}]},
+       {d:300,lines:[{t:`[OK] ${domain} 伪静态已配置: ${fw}`,c:'ok'}]}],
+      {doneMsg:`伪静态已应用: ${fw}`,onDone(){site.rewrite=fw;render()}});
+  });
+}
+function downloadArchive(file,size){
+  toast(`准备下载（${size}）…`,'info',1500);
+  const blob=new Blob([`phpbox Desktop 演示下载\n归档: ${file}\n大小: ${size}\n（桌面正式版经系统保存对话框直接导出完整 .tar.gz）`],{type:'text/plain'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=file.replace(/\.tar\.gz$/,'')+'.demo.txt';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast('已开始下载（演示文件；正式版为完整归档）','ok');
+}
 const VIEWS={sites:renderSites,php:()=>renderService('php'),mysql:()=>renderService('mysql'),pgsql:()=>renderService('pgsql'),
   redis:()=>renderService('redis'),nginx:()=>renderService('nginx'),go:renderGo,backup:renderBackup,offline:renderOffline,
   settings:renderSettings,overview:renderOverview};
@@ -581,28 +656,52 @@ function openUninstallModal(kind,v){
   });
 }
 function openExtModal(v){
-  const cur=[...PHP_EXTS];
-  openModal(`<div class="modal"><div class="modal-head"><h3>PHP ${esc(v)} 扩展</h3><p>应用后自动重建镜像并重载 Nginx（约 1-2 分钟，命中离线缓存更快）</p></div>
-    <div class="modal-body">
-      <div class="field"><label>已启用（<span id="ext-count">${cur.length}</span>）</label><div class="quick-picks" id="ext-chips">${cur.map(e=>`<button class="pick selected" data-ext="${esc(e)}">${esc(e)} ×</button>`).join('')}</div></div>
-      <div class="field"><label>预设档案</label><div class="quick-picks">${Object.keys(EXTS_PRESETS).map(p=>`<button class="pick" data-preset="${esc(p)}">${esc(p)}</button>`).join('')}</div></div>
-      <div class="field"><label>添加扩展</label><div style="display:flex;gap:8px"><input id="ext-add" type="text" placeholder="例如 apcu"><button class="btn" id="ext-add-btn">添加</button></div></div>
+  if(!state.phpExts) state.phpExts={};
+  if(!state.phpExts[v]) state.phpExts[v]={enabled:[...PHP_EXTS],disabled:[]};
+  const st=state.phpExts[v];
+  const orig=JSON.stringify(st);
+  openModal(`<div class="modal"><div class="modal-head"><h3>PHP ${esc(v)} 扩展</h3><p>点 chip 切换 启用/停用 · 也可自行输入扩展名 · 应用后重建镜像并重载 Nginx</p></div>
+    <div class="modal-body" id="ext-body">
+      <div class="field"><label>已启用（<span id="ext-count">${st.enabled.length}</span>）— 点击 chip 停用</label><div class="quick-picks" id="ext-on"></div></div>
+      <div class="field"><label>已停用（<span id="ext-off-n">${st.disabled.length}</span>）— 点击 chip 启用</label><div class="quick-picks" id="ext-off"></div></div>
+      <div class="field"><label>添加自定义扩展</label><div style="display:flex;gap:8px"><input id="ext-add" type="text" placeholder="例如 apcu、pcntl"><button class="btn" id="ext-add-btn">添加</button></div>
+      <div class="hint">白名单 <span class="mono">a-zA-Z0-9._-</span>；新扩展在重建镜像时装入</div></div>
       <div class="alert alert-warn">⚠ 应用后自动重建镜像并重载 Nginx（离线命中更快）</div></div>
-    <div class="modal-foot"><button class="btn" data-modal-close>取消</button><button class="btn btn-primary" id="m-ok">应用并重建</button></div></div>`);
-  const sync=()=>{ $('#ext-count').textContent=cur.length; };
-  $('#ext-chips').addEventListener('click',e=>{const b=e.target.closest('[data-ext]');if(!b)return;const n=b.dataset.ext;cur.splice(cur.indexOf(n),1);b.remove();sync();});
-  $('#ext-add-btn').addEventListener('click',()=>{const i=$('#ext-add'),n=i.value.trim();if(!n)return;if(!/^[a-zA-Z0-9._-]+$/.test(n)){toast('无效扩展名','err');return}if(cur.includes(n)){toast('已存在','info');return}cur.push(n);$('#ext-chips').insertAdjacentHTML('beforeend',`<button class="pick selected" data-ext="${esc(n)}">${esc(n)} ×</button>`);i.value='';sync();});
-  $$('[data-preset]').forEach(b=>b.addEventListener('click',()=>{cur.length=0;EXTS_PRESETS[b.dataset.preset].forEach(e=>{if(!cur.includes(e))cur.push(e)});$('#ext-chips').innerHTML=cur.map(e=>`<button class="pick selected" data-ext="${esc(e)}">${esc(e)} ×</button>`).join('');sync();}));
+    <div class="modal-foot"><button class="btn" data-modal-close>取消</button><button class="btn btn-primary" id="m-ok" disabled>应用并重建</button></div></div>`);
+  const render=()=>{
+    $('#ext-on').innerHTML=st.enabled.length?st.enabled.map(e=>`<button class="pick selected" data-ext="${esc(e)}" data-dir="off" title="点击停用">✓ ${esc(e)} ×</button>`).join(''):'<span class="hint">无启用扩展</span>';
+    $('#ext-off').innerHTML=st.disabled.length?st.disabled.map(e=>`<button class="pick" data-ext="${esc(e)}" data-dir="on" title="点击启用">＋ ${esc(e)}</button>`).join(''):'<span class="hint">无停用扩展</span>';
+    $('#ext-count').textContent=st.enabled.length;
+    $('#ext-off-n').textContent=st.disabled.length;
+    $('#m-ok').disabled=JSON.stringify(st)===orig;
+  };
+  $('#ext-body').onclick=e=>{
+    const b=e.target.closest('[data-ext]'); if(!b) return;
+    const n=b.dataset.ext;
+    if(b.dataset.dir==='off'){st.enabled=st.enabled.filter(x=>x!==n);st.disabled.push(n)}
+    else{st.disabled=st.disabled.filter(x=>x!==n);st.enabled.push(n)}
+    render();
+  };
+  $('#ext-add-btn').addEventListener('click',()=>{
+    const i=$('#ext-add'),n=i.value.trim();
+    if(!n)return;
+    if(!/^[a-zA-Z0-9._-]+$/.test(n)){toast('无效扩展名（白名单 a-zA-Z0-9._-）','err');return}
+    if(st.enabled.includes(n)||st.disabled.includes(n)){toast('已存在','info');return}
+    st.enabled.push(n);i.value='';render();toast(`已添加扩展 ${n}（重建时装入）`,'ok');
+  });
+  render();
   $('#modal-root').onkeydown=e=>{if(e.key==='Escape')closeModal()};
   $('#m-ok').addEventListener('click',()=>{
+    const added=st.enabled.filter(e=>!PHP_EXTS.includes(e)).length;
     closeModal();
-    runTask(`重建 PHP ${v}（扩展 ${cur.length} 个）`,`phpbox php extension add ${v} <新扩展>`,
-      [{d:400,lines:[{t:'[INFO] 1/5 写 extensions.env',c:'dim'}]},
+    runTask(`重建 PHP ${v}（启用 ${st.enabled.length} · 停用 ${st.disabled.length}）`,
+      `phpbox php extension apply ${v} --on ${st.enabled.join(',')} --off ${st.disabled.join(',')||'-'}`,
+      [{d:400,lines:[{t:`[INFO] 1/5 写 extensions.env（启用 ${st.enabled.length}${added?` · 新增 ${added}`:''} · 停用 ${st.disabled.length}）`,c:'dim'}]},
        {d:700,lines:[{t:'[INFO] 2/5 重建镜像（离线命中: apk+pecl 零网络）',c:'meta'}]},
        {d:900,lines:[{t:'[INFO] 3/5 重建容器...',c:'dim'}]},
        {d:500,lines:[{t:'[INFO] 4/5 nginx -t 校验',c:'dim'}]},
        {d:400,lines:[{t:'[INFO] 5/5 nginx reload',c:'dim'}]},
-       {d:300,lines:[{t:'[OK] PHP '+v+' 扩展已更新（共 '+cur.length+' 个）',c:'ok'}]}],
+       {d:300,lines:[{t:`[OK] PHP ${v} 扩展已更新（启用 ${st.enabled.length} 个）`,c:'ok'}]}],
       {doneMsg:'扩展已更新'});
   });
 }
@@ -700,6 +799,8 @@ document.addEventListener('click',e=>{
     $('#m-ok').addEventListener('click',()=>{closeModal();runTask('删除站点 '+d,'phpbox site remove '+d,[{d:400,lines:[{t:'[INFO] 移除 vhost...',c:''}]},{d:400,lines:[{t:'[OK] 已删除并重载',c:'ok'}]}],{doneMsg:'站点已删除',onDone(){state.sites=state.sites.filter(x=>x.domain!==d);render()}})});}
   else if(a==='hosts-add'){const d=act.dataset.domain;toast('需要提权写入 /etc/hosts（桌面版走特权助手）','info',4000);setTimeout(()=>{const s=state.sites.find(x=>x.domain===d);if(s)s.hosts=true;render();toast('hosts 已添加','ok')},900)}
   else if(a==='diagnose') openDiagnoseModal(act.dataset.domain);
+  else if(a==='site-logs') openSiteLogsModal(act.dataset.domain);
+  else if(a==='download-archive') downloadArchive(act.dataset.file,act.dataset.size);
   else if(a==='copy') copyText(act.dataset.copy);
   else if(a==='pw-dsn'){const k=act.dataset.key,[k1,v]=k.split('.');copyText(k1==='mysql'?`mysql -h127.0.0.1 -P${state.ports[k]} -uroot -p`:`postgresql://postgres:<密码>@127.0.0.1:${state.ports[k]}/postgres`)}
   else if(a==='pw-reveal'){const k=act.dataset.key,id='pw-'+k.replace('.','-'),el=document.getElementById(id);if(!el)return;el.textContent=state.passwords[k]||'—';toast('8 秒后自动掩码','info',1500);setTimeout(()=>{el.textContent='••••••••'},8000)}
