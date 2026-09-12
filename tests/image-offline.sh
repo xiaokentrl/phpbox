@@ -12,13 +12,11 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-pass=0; fail=0
-ok()  { echo "PASS: $*"; pass=$((pass+1)); }
-bad() { echo "FAIL: $*" >&2; fail=$((fail+1)); }
+source tests/lib.sh
 
-box=$(mktemp -d)
-trap 'rm -rf "$box"' EXIT
-mkdir -p "$box/fakebin"
+
+test_init_sandbox
+box="$TEST_BOX"
 
 # 假 docker：inspect/pull/load/save 按 FAKE_* 行为走，调用留痕到 $FAKE_DOCKER_LOG。
 # 镜像存在性 = 显式预置（FAKE_LOCAL_IMAGES）或本会话已成功 load（状态文件）——
@@ -64,7 +62,6 @@ chmod +x "$box/fakebin/tar"
 export FAKE_DOCKER_LOG="$box/docker.calls"
 export FAKE_LOADED_STATE="$box/loaded.state"
 : > "$FAKE_LOADED_STATE"   # 本会话已成功 load 的镜像清单（替身的 docker 状态记忆）
-export PATH="$box/fakebin:$PATH"
 
 source lib/common/log.sh
 source lib/common/env.sh
@@ -189,6 +186,4 @@ ptarf="$OFFLINE_DIR/pgsql/16/pgsql-16.tar"
 [ -f "$ptarf" ] && ok "场景7b 回写落在裸版本目录（$ptarf）" || bad "场景7b 离线库路径错误"
 unset FAKE_LOAD_IMAGE
 
-echo "----------------------------------------"
-echo "image-offline: PASS=$pass FAIL=$fail"
-[ $fail -eq 0 ] || exit 1
+test_summary "image-offline"

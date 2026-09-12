@@ -8,13 +8,11 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-pass=0; fail=0
-ok()  { echo "PASS: $*"; pass=$((pass+1)); }
-bad() { echo "FAIL: $*" >&2; fail=$((fail+1)); }
+source tests/lib.sh
 
-box=$(mktemp -d)
-trap 'rm -rf "$box"' EXIT
-mkdir -p "$box/fakebin"
+
+test_init_sandbox
+box="$TEST_BOX"
 
 # 假 docker：record 一切调用；按挂载点伪装出 容器内 root 打包/解包 的语义——
 # 沙箱文件宿主可读，故用宿主 tar 真实生成/解出成员 tar，测试产物真实可用
@@ -80,7 +78,6 @@ export FAKE_VOLUME_NAME="phpbox_redis8_data"
 export FAKE_VOL_SRC="$box/volsrc"
 mkdir -p "$FAKE_VOL_SRC"
 echo vol-data > "$FAKE_VOL_SRC/dump.rdb"
-export PATH="$box/fakebin:$PATH"
 
 # 环境：先加载默认，再整体指向沙箱（顺序反了会被 env.sh 默认值盖回真实目录）
 source lib/common/log.sh
@@ -170,6 +167,4 @@ else
   [ ! -e /home/x/evil.txt ] && [ ! -e "$box/home/x/evil.txt" ] && ok "场景4 越界成员 tar 被拒绝" || bad "场景4 拒绝了但解了包"
 fi
 
-echo "----------------------------------------"
-echo "backup: PASS=$pass FAIL=$fail"
-[ $fail -eq 0 ] || exit 1
+test_summary "backup"

@@ -9,9 +9,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-pass=0; fail=0
-ok()  { echo "PASS: $*"; pass=$((pass+1)); }
-bad() { echo "FAIL: $*" >&2; fail=$((fail+1)); }
+source tests/lib.sh
+
 
 # ---- 断言 1：静态顺序检查 ----
 src="lib/php/common/install.sh"
@@ -33,8 +32,8 @@ done < <(grep -rn 'echo .* > "\$.*CONFIG_DIR' lib/*/common/*.sh 2>/dev/null | gr
 # 加载被测函数的最小依赖集，用替身目录复现"config/php/7.4 不存在"的全新安装场景。
 # 顺序关键：先加载默认环境、再覆盖 PHP_CONFIG_DIR 指向沙箱——反过来会被 env.sh 的
 # 默认定义盖回真实目录，污染工作区（测试第一版就犯了这个错）
-sandbox=$(mktemp -d)
-trap 'rm -rf "$sandbox"' EXIT
+test_init_sandbox
+sandbox="$TEST_BOX"
 
 source lib/common/log.sh
 source lib/common/env.sh
@@ -63,6 +62,4 @@ else
   bad "反向钳制: _php_write_extensions 自行了 mkdir，破坏与 init_config_files 的职责边界"
 fi
 
-echo "----------------------------------------"
-echo "install-order: PASS=$pass FAIL=$fail"
-[ $fail -eq 0 ] || exit 1
+test_summary "install-order"

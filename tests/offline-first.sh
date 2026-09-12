@@ -9,17 +9,16 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-pass=0; fail=0
-ok()  { echo "PASS: $*"; pass=$((pass+1)); }
-bad() { echo "FAIL: $*" >&2; fail=$((fail+1)); }
+source tests/lib.sh
+
 
 source lib/common/log.sh          # log/error：被测函数的依赖
 source lib/php/common/apk-fetch.sh   # 与真实加载链同序（downloader → offline）
 source lib/php/common/offline.sh  # 被测层：PECL 暂存/晋升 + 代理解析（优化切片 A 拆分后所在）
 source lib/php/common/build.sh    # 编排层也一并加载，保持与 bin/phpbox 装载形态一致
 
-box=$(mktemp -d)
-trap 'rm -rf "$box"' EXIT
+test_init_sandbox
+box="$TEST_BOX"
 
 # curl 替身：记录每次调用；伪造 -w url_effective（stdout）与 -o 落盘
 mkdir -p "$box/fakebin"
@@ -83,7 +82,6 @@ calls=$(wc -l < "$FAKE_CURL_LOG" 2>/dev/null || echo 0)
 # ---- 场景 3：代理解析公共前段（优化切片 D）——base/resolve 语义边界 ----
 # 前两个场景用"命令前缀 PATH"注入替身；本场景直接调用解析函数，须显式导出。
 # ip 替身：-o 形式给 detect 用（$4 取地址），无 -o 形式给 resolve 用（$2 取地址）
-export PATH="$box/fakebin:$PATH"
 cat > "$box/fakebin/ip" <<'EOF'
 #!/bin/sh
 case " $* " in
@@ -116,6 +114,4 @@ export BUILD_PROXY=http://10.0.0.5:8888
   && ok "场景3 resolve: 非本机显式代理原样（不误改写）" \
   || bad "场景3 resolve: 非本机代理被误改写: $(_php_resolve_build_proxy)"
 
-echo "----------------------------------------"
-echo "offline-first: PASS=$pass FAIL=$fail"
-[ $fail -eq 0 ] || exit 1
+test_summary "offline-first"

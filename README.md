@@ -263,7 +263,7 @@ $HOME/phpbox/
 
 ```bash
 bash tests/lint.sh    # 全量 bash -n 语法门禁（含容器内脚本）
-bash tests/run.sh    # 五闸门：lint → 函数清单 → 冒烟 → offline-first 行为 → install 顺序回归
+bash tests/run.sh    # 七闸门：lint → 函数清单 → 冒烟 → offline-first → install 顺序 → 镜像离线 → backup/restore
 ```
 
 冒烟与行为测试优先用可控替身（假 curl / 沙箱目录），不依赖真实网络；涉及真实 Docker 的项目显式标注。
@@ -537,7 +537,7 @@ The repository **tracks only sources and templates**: `bin/phpbox`, `lib/`, `ins
 
 ```bash
 bash tests/lint.sh    # bash -n syntax gate over all shell sources
-bash tests/run.sh    # five gates: lint → function inventory → smoke → offline-first → install-order
+bash tests/run.sh    # seven gates: lint → function inventory → smoke → offline-first → install-order → image-offline → backup/restore
 ```
 
 Behavior tests prefer controlled fakes (fake curl, sandboxed dirs) and don't require the network; items needing real Docker are labeled explicitly.

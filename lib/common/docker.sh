@@ -73,7 +73,8 @@ _image_offline_tar_path() {
 #   2. 离线库命中 → docker load 零网络；load 后 tag 与期望不符 = 必须报错，
 #      禁止让后续步骤静默联网拉取绕过离线契约
 #   3. 都没有 → docker pull；mode=install 时拉取成功后回写离线库（尽力而为，
-#      回写失败仅告警不中断安装）；mode=preload 只拉取不回写
+#      回写失败仅告警不中断安装）；mode=preload 只拉取不回写——当前无生产调用方，
+#      预留给将来的 offline 管理命令（list/verify/prune/preload）使用，勿删
 # 参数：$1=服务名（离线库子目录）  $2=版本（离线库子目录，与 tag 后缀不一定相同：
 #       redis:8-alpine 的版本是 8）  $3=镜像 tag（mysql:8.4 / redis:8-alpine）
 #       $4=mode（install|preload）。拉取/回写共用 600s 总超时——覆盖 1GB 级镜像的
