@@ -3,7 +3,7 @@
 ## 1. 项目定位
 
 - **项目类型**：纯 Bash 实现的本地 Docker LNMP 多版本开发环境管理器。
-- **核心服务**：PHP、MySQL、PostgreSQL、Redis、Nginx、Go，以及站点和 hosts管理。
+- **核心服务**：PHP、MySQL、PostgreSQL、Redis、Nginx、Go，以及站点和 hosts 管理。
 - **运行边界**：只面向本地开发，不作为生产部署系统。
 - **首要目标**：可查阅、可恢复、可重复安装、长操作有反馈、失败不破坏旧状态。
 - **技术栈**：Bash 4.4+、Docker、Docker Compose、Alpine APK、PECL、Shell 脚本测试。
@@ -23,7 +23,7 @@
 | `.env`、服务配置和扩展状态 | 用户/项目运行期 | 可覆盖，变更前保留旧值 |
 | Compose、Dockerfile、vhost 生成物 | 生成脚本 | 修改生成逻辑后重新生成 |
 | 数据目录和 Docker 数据卷 | 用户数据 | 默认保留，禁止隐式删除 |
-| `offline/` 缓存 | 构建事务 | 仅成功验证后晋升（php/ 为构建闭包；mysql/ 为已拉取镜像 tar） |
+| `offline/` 缓存 | 构建事务 | 仅成功验证后晋升（php/ 为构建闭包；mysql/pgsql/redis/nginx/ 为已拉取镜像 tar） |
 | `cache/go/` | Go 开发缓存 | 按 Go 版本保存 GOPATH 模块和工具缓存，不作为完整离线仓库 |
 | 临时文件、容器、镜像和锁 | 当前事务 | 成功或失败后清理 |
 
