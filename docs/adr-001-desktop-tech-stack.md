@@ -55,3 +55,9 @@ phpbox（纯 Bash 的本地 Docker LNMP 管理器，70 文件/155 函数/七闸�
 
 **Amendment 1（2026-09-13，基于外部评审二）**：① v3 状态表述补官方原文（2026-08-02 公告：beta 但桌面 API 已稳定、有生产使用；纠正中文社区"已 GA"谣言）；② Tauri sidecar 论点精化（一次性命令可行，缺的是高频短命令+流式的开箱抽象）；③ 托盘约束显性化（v2 无官方托盘 + energye/systray 的 macOS 点击处理器限制）；④ 新增触发器 5/6（壳层评估窗口 + 时间检查点）；⑤ WSL2 追加公开发布条件项。核验来源：Wails 官方博客/FAQ/GitHub 状态表、Wails 维护者 leaanthony 关于 systray 不进 v2 的确认、docker client 官方文档（WithAPIVersionNegotiation 推荐）、tauri-sidecar-manager crate。
 **Amendment 2（2026-09-13，基于外部评审三）**：外部评审确认——错误二分法成立（pgsql=事实性错误/危害半径小，托盘=前提性误读/技术判断本身准确）；"稳定 ≠ 适合作为起点"（beta 隐性税对单人+Go 新手放大）；"不切换 v3 不是押注 v3 不 GA，而是把决策权交给触发器"；规格 v2.1 九项采纳零过度采纳。修正：触发器 #6 语义显式化——日期只是审视时点，决策仍需技术条件（阻断"时间到了要迁移"的焦虑驱动误读）。**结论：决策框架收敛，后续有效输入转为代码（阶段 0 POC），不再接受对本 ADR 的进一步元评审。**
+
+**Amendment 3（2026-09-13，触发器 #3 触发：用户确认托盘为硬需求）**：
+
+评估：① v2 无官方托盘（维护者确认）；② v2 + energye/systray 在 **macOS 存在 AppDelegate 冲突（链接错误，Issue #1521）**，维护者在 Issue #1010 原话 "Running systray and Wails together is basically impossible"；社区补丁 ra1phdd/systray-on-wails 存在但维护性存疑；③ **Linux/Windows 下 energye/systray 与 v2 组合可用**（冲突仅 macOS）；④ Wails v3 内置原生托盘（官方文档）。
+
+决策：**维持 v2，托盘经 energye/systray 实现，范围 Linux/Windows（v0.1 交付）；macOS 托盘随 v3 迁移交付**。理由：用户主力平台 Linux（energye 路径完全可用）；v3 beta 税（Amendment 1 论证）对单人开发仍高于"macOS 托盘延后"的代价；托盘实现隔离在 internal/app/tray（TrayProvider 接口），v3 迁移时仅换实现、菜单定义零改动。若 macOS 托盘提前成为硬需求 → 触发器 5（评估窗口）提前，按有界迁移切换 v3。

@@ -34,6 +34,7 @@
 | 桌面壳 | **Wails v2.10+（当前稳定版）** | Wails v3 为 beta（官方 2026-08-02 公告："beta release, not the final 3.0 release. The desktop API is stable and teams are already using v3 in production, but you should test thoroughly"，无 GA 日期；中文社区"已 GA"说法不实）。壳层仅 main.go + bindings；v3 GA 迁移为有界壳层任务（Vue 零改动，≤2 天） |
 | 前端 | Vue 3 + TypeScript + Vite + Naive UI + Pinia | Naive UI：TS 优先/树摇/暗色主题/开发工具气质 |
 | 特权操作 | 平台分支助手：Linux `pkexec` / macOS `osascript`（或 launchd helper） / Windows `Start-Process -Verb RunAs` | 目前唯一特权点 = hosts 编辑 |
+| 系统托盘 | **energye/systray**（Linux/Windows，v0.1 交付）；macOS 随 Wails v3 迁移补齐（v2+energye 存在 AppDelegate 冲突，Issue #1521） | 菜单定义隔离在 internal/app/tray（TrayProvider 接口），v3 迁移仅换实现 |
 | 先例 | Docker Desktop = Electron 前端 + Go 后端（com.docker.backend，gRPC） | 验证"Go 引擎 + Web 技术 UI"分层；无官方 Go→Rust 重写公告（已核验） |
 | 备选/拒绝 | Tauri 2 备选（sidecar 缺"高频短命令+流式"开箱抽象；energye/systray 类第三方托盘有 macOS 菜单-点击处理器互斥限制）；Electron 拒绝（150MB+ 与轻量定位相悖） | 重估触发器见 ADR §6 |
 
@@ -83,6 +84,7 @@ phpbox-desktop/
 ├── Makefile                       # dev / build / parity / lint / purity / ci
 ├── internal/
 │   ├── app/                       # 装配层：接口→实现接线、事件桥
+│   │   └── tray/                  #   托盘（TrayProvider 接口隔离；energye 实现，v3 换原生）
 │   ├── bindings/                  # Wails 绑定（薄适配；阶段0含 bash spawn 桥）
 │   │   ├── services.go  sites.go  backup.go  offline.go  system.go
 │   ├── engine/                    # ★ 纯 Go 内核（禁 import wails/任何 UI 包）
@@ -274,7 +276,14 @@ func RunStream(ctx context.Context, cmd *exec.Cmd, onLine func(string)) error
 
 ## 10. UI 设计（全量）
 
-**IA**：站点（首屏）· PHP · MySQL · PostgreSQL · Redis · Nginx · Go · 备份恢复 · 离线缓存 · 设置 · 总览（兜底）。全局设施：Onboarding、任务中心（单队列 + 陈旧锁恢复）、通知中心、命令面板 Ctrl+K。窗口最小 1024×680，宽 <1200 导航收缩图标模式。
+**IA**：站点（首屏）· PHP · MySQL · PostgreSQL · Redis · Nginx · Go · 备份恢复 · 离线缓存 · 设置 · 总览（兜底）。全局设施：Onboarding、任务中心（单队列 + 陈旧锁恢复）、通知中心、命令面板 Ctrl+K、**系统托盘**。窗口最小 1024×680，宽 <1200 导航收缩图标模式。
+
+**系统托盘**（v0.1，Linux/Windows；macOS 随 v3）：
+- 生命周期：关闭窗口 = 最小化到托盘（非退出）；退出仅经托盘菜单（防误触）。
+- 菜单：打开 phpbox ─ 全部启动 / 全部停止 ─ 各实例子菜单（●状态 启动/停止/日志）─ 分隔 ─ 退出。
+- 图标状态色：绿=全部 healthy；黄=部分异常；红=daemon 不可达；灰=部分停止（无异常）。与健康巡检共用 8s 周期（不双轮询）。
+- 单实例：二次启动唤起已有窗口。
+- 平台矩阵：Linux ✓ / Windows ✓ 全功能；macOS=菜单可用、图标点击处理器不可用（energye 限制）→ 打开走菜单项。
 
 **页面矩阵**：
 
@@ -376,11 +385,11 @@ export interface TaskState { id: string; label: string; cliPreview: string;
 
 | 阶段 | 交付 | 引擎 | 平台 | 验收 |
 | --- | --- | --- | --- | --- |
-| 阶段 0（M0→M0.5） | Wails v2 骨架 → docker POC → v0.1 MVP（Onboarding/总览/安装向导/实例详情+连接抽屉/站点/任务抽屉/设置/i18n 脚手架） | bash spawn + 日志推断 | Linux/macOS | 装 PHP→建站→hosts→浏览器可访问零终端操作；七闸门+purity 绿 |
+| 阶段 0（M0→M0.5） | Wails v2 骨架 → docker POC → v0.1 MVP（Onboarding/总览/安装向导/实例详情+连接抽屉/站点/任务抽屉/设置/i18n 脚手架/**托盘**[Linux/Windows]） | bash spawn + 日志推断 | Linux/macOS（macOS 无托盘，随 v3 补） | 装 PHP→建站→hosts→浏览器可访问零终端操作；七闸门+purity 绿 |
 | 阶段 0.5 | 壳层评估窗口 | —— | —— | 触发器 5/6 复评 v3 |
 | 阶段 1（M1→M1.5） | Go 引擎热路径 → v1.0（备份恢复/扩展增删/Go 线/通知/命令面板） | Go 逐包替换，parity 逐包转绿 | +Windows 原生 | parity 全绿；Windows 实测；离线徽章端到端 |
 | 阶段 2（M2） | 离线管理页 · 诊断面板 · 站点健康 · PHP 线移植 · 插件 T1（MongoDB 打样）· i18n 发布 | Go 全量 | 三平台 | 断网重装实测；六模式诊断实测 |
-| 阶段 3（M3） | 托盘 · 嵌入式终端 · 多机 | server 模式可选 | 三平台 | 随 Wails v3 迁移（若触发） |
+| 阶段 3（M3） | macOS 托盘（随 Wails v3 迁移补齐）· 嵌入式终端 · 多机 | server 模式可选 | 三平台 | 随 Wails v3 迁移（若触发） |
 
 ---
 
@@ -396,6 +405,7 @@ export interface TaskState { id: string; label: string; cliPreview: string;
 | R6 | 单人 bus factor | 文档全套 + parity 可接手 | 持续 |
 | R7 | parity 漂移 | CI 强制对拍 | 制度性 |
 | R8 | 容器环境陷阱在重写中丢失 | §12.2 行为保持清单 + 评审条款 | 制度性 |
+| R9 | 托盘依赖第三方库（energye）维护性 | TrayProvider 接口隔离实现；v3 迁移换原生；macOS 限制已文档化 | 缓解中 |
 
 ---
 
@@ -432,3 +442,4 @@ export interface TaskState { id: string; label: string; cliPreview: string;
 | v1.0 | 2026-09-13 | 初版定稿（12 章） |
 | v1.1 | 2026-09-13 | Go 1.27 版本策略与泛型规范（§5.3/§5.4）、internal/pkg、go tool |
 | v2.0 | 2026-09-13 | **全量自包含版**：整合 Annex A/B 全部技术细节——各服务线细节（§6）、备份恢复（§7）、安全与插件体系（§9）、UI 全量（§10）、行为保持清单（§12.2）、故障模式库（§15）；本文成为唯一日常阅读文档，Annex A/B 保留为决策过程记录 |
+| v2.1 | 2026-09-13 | 触发器 #3 触发（用户确认托盘硬需求）→ 评估后决策：维持 v2 + energye/systray（Linux/Windows，v0.1 交付），macOS 托盘随 v3 迁移；新增托盘设计（菜单/图标状态/生命周期/单实例）与 R9；TrayProvider 接口隔离 |
