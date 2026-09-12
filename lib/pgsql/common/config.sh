@@ -18,7 +18,7 @@ _pgsql_generate_compose() {
   local ver=$1
   local svc_key=$(get_service_key "pgsql" "$ver")
   local cname=$(get_container_name "pgsql" "$ver")
-  local port=$(get_or_set_port "pgsql" "$ver" "5432")
+  local port=$(get_or_set_port "pgsql" "$ver" "$_PGSQL_DEFAULT_PORT")
   # 仅确保密码已写入 .env；函数以 echo 返回密码值，裸调用会把密码打印到终端
   get_or_set_password "pgsql" "$ver" > /dev/null
   local data_dir="${PGSQL_DATA_ROOT}/${ver}"

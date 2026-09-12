@@ -2,13 +2,16 @@
 # shellcheck shell=bash
 # Nginx 安装/移除/启动/端口生命周期（搬运自 lib/nginx.sh，纯迁移无逻辑改动）
 
+# 线内默认端口常量：安装与端口兜底两处引用，禁止再写字面量
+_NGINX_DEFAULT_PORT=80
+
 _nginx_ensure_running() {
   _nginx_validate || error "Nginx 配置验证失败"
 
   run_compose "nginx" "default" up -d "nginx"
   # up 之后只读端口，不走 get_or_set_port 的占用检查：宿主机上该端口已被刚启动的
   # nginx 自己监听（Docker 发布端口），重查会被误判为"被占"而改写 .env 并让健康检查打错端口
-  local port=$(read_env_value "NGINX_PORT" "80")
+  local port=$(read_env_value "NGINX_PORT" "$_NGINX_DEFAULT_PORT")
   local timeout=20
   while [ $timeout -gt 0 ]; do
     if http_probe_ok "$port"; then
@@ -51,7 +54,7 @@ _nginx_install() {
     check_and_report_port "$port" || error "端口 ${port} 不可用"
     env_set "NGINX_PORT" "$port"
   else
-    get_or_set_port "nginx" "default" "80" > /dev/null   # 未指定端口：自动挑空闲端口并记录
+    get_or_set_port "nginx" "default" "$_NGINX_DEFAULT_PORT" > /dev/null   # 未指定端口：自动挑空闲端口并记录
   fi
 
   # 镜像获取走离线事务（offline/nginx/<tag>/ 命中则零网络），在生成配置前：

@@ -4,6 +4,8 @@
 
 # Redis 官方稳定主版本 tag：redis:8-alpine 会跟随 Redis 8 稳定版补丁发布。
 _REDIS_DEFAULT_VERSION=8
+# 线内默认端口常量：install/port/config/list 四处引用，禁止再写字面量
+_REDIS_DEFAULT_PORT=6379
 
 _redis_ensure_running() {
   local ver=$1
@@ -32,7 +34,7 @@ _redis_install() {
   # 镜像获取走离线事务（offline/redis/<版本>/ 命中则零网络），
   # 必须在 _generic_service_install 之前：容器启动依赖镜像已在本地
   _redis_ensure_image "$ver" "install" >/dev/null   # stdout 的镜像名无人捕获，吞掉防终端污染
-  _generic_service_install "redis" "$ver" "6379" "$@"
+  _generic_service_install "redis" "$ver" "$_REDIS_DEFAULT_PORT" "$@"
 }
 
 _redis_show_list() {
@@ -42,7 +44,7 @@ _redis_show_list() {
     local ver=$(basename "$f" .yml | sed 's/redis-//')
     local cname=$(get_container_name "redis" "$ver")
     local status=$(docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || echo "不存在")
-    local port=$(read_env_value "REDIS_${ver//./}_PORT" "6379")
+    local port=$(read_env_value "REDIS_${ver//./}_PORT" "$_REDIS_DEFAULT_PORT")
     printf "  %s  %s  (端口: %s)\n" "$ver" "$status" "$port"
   done
 }

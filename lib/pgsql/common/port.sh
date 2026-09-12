@@ -10,5 +10,5 @@ _pgsql_port_set() {
   [ -z "$ver" ] && error "请指定版本"
   [ -z "$new_port" ] && error "请指定新端口"
   validate_version "$ver"
-  _generic_db_port_set "pgsql" "$ver" "$new_port" "5432"
+  _generic_db_port_set "pgsql" "$ver" "$new_port" "$_PGSQL_DEFAULT_PORT"
 }

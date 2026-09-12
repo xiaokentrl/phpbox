@@ -6,7 +6,7 @@ _mysql_generate_compose() {
   local ver=$1
   local svc_key=$(get_service_key "mysql" "$ver")
   local cname=$(get_container_name "mysql" "$ver")
-  local port=$(get_or_set_port "mysql" "$ver" "3306")
+  local port=$(get_or_set_port "mysql" "$ver" "$_MYSQL_DEFAULT_PORT")
   # 仅确保密码已写入 .env；函数以 echo 返回密码值，裸调用会把 root 密码打印到终端
   get_or_set_password "mysql" "$ver" > /dev/null
   local data_dir="${MYSQL_DATA_ROOT}/${ver}"

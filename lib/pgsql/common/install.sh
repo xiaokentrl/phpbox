@@ -2,6 +2,9 @@
 # shellcheck shell=bash
 # PostgreSQL 安装/卸载/启动/清单生命周期
 
+# 线内默认端口常量：install/port/config/list 四处引用，禁止再写字面量
+_PGSQL_DEFAULT_PORT=5432
+
 _pgsql_ensure_running() {
   local ver=$1
   local svc_key=$(get_service_key "pgsql" "$ver")
@@ -27,7 +30,7 @@ _pgsql_install() {
   # 镜像获取走离线事务（offline/pgsql/<版本>/ 命中则零网络），
   # 必须在 _generic_service_install 之前：容器启动依赖镜像已在本地
   _pgsql_ensure_image "$ver" "install" >/dev/null
-  _generic_service_install "pgsql" "$ver" "5432" "$@"
+  _generic_service_install "pgsql" "$ver" "$_PGSQL_DEFAULT_PORT" "$@"
   # 本地开发场景：安装完成直接亮出密码，免翻 .env。
   # 自定义密码：安装前在 .env 预设 PGSQL_<去点版本>_ROOT_PASSWORD，留空则自动生成
   local pass; pass=$(get_or_set_password "pgsql" "$ver")
@@ -41,7 +44,7 @@ _pgsql_show_list() {
     local ver=$(basename "$f" .yml | sed 's/pgsql-//')
     local cname=$(get_container_name "pgsql" "$ver")
     local status=$(docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || echo "不存在")
-    local port=$(read_env_value "PGSQL_${ver//./}_PORT" "5432")
+    local port=$(read_env_value "PGSQL_${ver//./}_PORT" "$_PGSQL_DEFAULT_PORT")
     printf "  %s  %s  (端口: %s, 数据目录: %s/%s)\n" "$ver" "$status" "$port" "$PGSQL_DATA_ROOT" "$ver"
   done
 }

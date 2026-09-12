@@ -10,5 +10,5 @@ _mysql_port_set() {
   [ -z "$ver" ] && error "请指定版本"
   [ -z "$new_port" ] && error "请指定新端口"
   validate_version "$ver"
-  _generic_db_port_set "mysql" "$ver" "$new_port" "3306"
+  _generic_db_port_set "mysql" "$ver" "$new_port" "$_MYSQL_DEFAULT_PORT"
 }

@@ -2,6 +2,10 @@
 # shellcheck shell=bash
 # MySQL 安装/卸载/启动/清单生命周期（搬运自 lib/mysql.sh，纯迁移无逻辑改动）
 
+# 线内默认端口常量：install/port/config/list 四处引用，禁止再写字面量（加载序保证
+# 线内其余文件可见本常量——bin/phpbox 中 install.sh 先于 port/config 装载）
+_MYSQL_DEFAULT_PORT=3306
+
 # 清理数据目录中残留的 mysql.sock 符号链接。mysqld 运行时会在数据目录创建指向
 # /var/run/mysqld/mysqld.sock 的符号链接，容器异常停止（kill/断电/崩溃）后它不会消失；
 # mysql 官方镜像 entrypoint 启动时的 chown -R 在 overlayfs 上 chown 该符号链接会报
@@ -43,7 +47,7 @@ _mysql_install() {
   # 镜像获取走离线事务（offline/mysql/<版本>/ 命中则零网络），
   # 必须在 _generic_service_install 之前：配置生成与容器启动都依赖镜像已在本地
   _mysql_ensure_image "$ver" "install" >/dev/null   # stdout 的镜像名无人捕获，吞掉防终端污染
-  _generic_service_install "mysql" "$ver" "3306" "$@"
+  _generic_service_install "mysql" "$ver" "$_MYSQL_DEFAULT_PORT" "$@"
   # 本地开发场景：安装完成直接亮出 root 密码，免翻 .env。
   # 自定义密码：安装前在 .env 预设 MYSQL_<去点版本>_ROOT_PASSWORD，留空则自动生成
   local pass; pass=$(get_or_set_password "mysql" "$ver")
@@ -57,7 +61,7 @@ _mysql_show_list() {
     local ver=$(basename "$f" .yml | sed 's/mysql-//')
     local cname=$(get_container_name "mysql" "$ver")
     local status=$(docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || echo "不存在")
-    local port=$(read_env_value "MYSQL_${ver//./}_PORT" "3306")
+    local port=$(read_env_value "MYSQL_${ver//./}_PORT" "$_MYSQL_DEFAULT_PORT")
     printf "  %s  %s  (端口: %s, 数据目录: %s/%s)\n" "$ver" "$status" "$port" "$MYSQL_DATA_ROOT" "$ver"
   done
 }

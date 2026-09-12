@@ -10,5 +10,5 @@ _redis_port_set() {
   [ -z "$ver" ] && error "请指定版本"
   [ -z "$new_port" ] && error "请指定新端口"
   validate_version "$ver"
-  _generic_db_port_set "redis" "$ver" "$new_port" "6379"
+  _generic_db_port_set "redis" "$ver" "$new_port" "$_REDIS_DEFAULT_PORT"
 }

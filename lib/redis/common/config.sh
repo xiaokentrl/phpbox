@@ -19,7 +19,7 @@ _redis_generate_compose() {
   local svc_key=$(get_service_key "redis" "$ver")
   local cname=$(get_container_name "redis" "$ver")
   local vol_name=$(get_volume_name "redis" "$ver")
-  local port=$(get_or_set_port "redis" "$ver" "6379")
+  local port=$(get_or_set_port "redis" "$ver" "$_REDIS_DEFAULT_PORT")
   local password_key="REDIS_${ver//./}_ROOT_PASSWORD"
   local yml="$EXT_DIR/redis-${ver}.yml"
 
