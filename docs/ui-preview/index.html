@@ -605,6 +605,22 @@ const VIEWS={sites:renderSites,php:()=>renderService('php'),mysql:()=>renderServ
 function openModal(html){const r=$('#modal-root');r.innerHTML=html;r.classList.add('open');}
 function closeModal(){const r=$('#modal-root');r.classList.remove('open');r.innerHTML='';r.onkeydown=null;}
 function modalCmdPreview(sel,html){$(sel).innerHTML=`<span class="prompt">$ </span>${html}`;}
+
+// 危险操作统一二次确认弹窗（UI 规格 §7.1：数据删除双保险、配置类单确认）
+// requireInput = { hint, value }：输入匹配后才解锁确认按钮（最高档，用于 --purge）
+function openConfirmModal({ title, desc = '', warnHtml = '', requireInput = null, actionLabel = '确认', onConfirm }) {
+  openModal(`<div class="modal"><div class="modal-head"><h3>${title}</h3>${desc?`<p>${desc}</p>`:''}</div>
+    <div class="modal-body">${warnHtml}
+    ${requireInput?`<div class="field"><label>${esc(requireInput.hint)}</label><input id="m-req" type="text" autocomplete="off" placeholder="${esc(requireInput.value)}"></div>`:''}</div>
+    <div class="modal-foot"><button class="btn" data-modal-close>取消</button>
+    <button class="btn btn-danger" id="m-ok" style="background:var(--danger-bg);border-color:rgba(255,92,92,.3)" ${requireInput?'disabled':''}>${actionLabel}</button></div></div>`);
+  if (requireInput) {
+    $('#m-req').addEventListener('input', e => { $('#m-ok').disabled = e.target.value.trim() !== requireInput.value; });
+    setTimeout(() => $('#m-req').focus(), 60);
+  }
+  $('#modal-root').onkeydown = e => { if (e.key === 'Escape') closeModal(); };
+  $('#m-ok').addEventListener('click', () => { closeModal(); onConfirm(); });
+}
 function openInstallModal(kind){
   const meta=SVC_META[kind],installed=state.installed[kind]||[],single=!!meta.single;
   openModal(`<div class="modal"><div class="modal-head"><h3>安装 ${meta.title}</h3><p>选择版本，自动生成配置并启动容器（优先命中离线缓存）</p></div>
@@ -642,69 +658,31 @@ function installSteps(kind,v){
 }
 function openUninstallModal(kind,v){
   const meta=SVC_META[kind];
+  let purge=false;
   openModal(`<div class="modal"><div class="modal-head"><h3>卸载 ${meta.title} ${esc(v)}</h3><p>停止并移除该版本的服务容器与配置</p></div>
-    <div class="modal-body"><div class="alert alert-warn">数据目录/配置/镜像/离线缓存默认全部保留。选择 <span class="mono">--purge</span> 会连同数据删除，不可恢复。</div>
-    <div class="field"><label>卸载方式</label><div class="quick-picks"><button class="pick selected" data-purge="no">仅卸载服务</button><button class="pick" data-purge="yes">连同数据清除（--purge）</button></div></div>
-    <div class="field"><label>将执行</label><div class="cmd-preview" id="m-preview"></div></div></div>
-    <div class="modal-foot"><button class="btn" data-modal-close>取消</button><button class="btn btn-danger" id="m-ok" style="background:var(--danger-bg);border-color:rgba(255,92,92,.3)">确认卸载</button></div></div>`);
-  let purge=false; const upd=()=>modalCmdPreview('#m-preview',esc([kind,'uninstall',v,...(purge?['--purge']:[])].join(' ')));
-  $$('.pick').forEach(p=>p.addEventListener('click',()=>{$$('.pick').forEach(x=>x.classList.remove('selected'));p.classList.add('selected');purge=p.dataset.purge==='yes';upd()}));
-  upd(); $('#modal-root').onkeydown=e=>{if(e.key==='Escape')closeModal()};
-  $('#m-ok').addEventListener('click',()=>{
-    closeModal();
-    runTask(`卸载 ${meta.title} ${v}${purge?'（含数据）':''}`,`phpbox ${kind} uninstall ${v}${purge?' --purge':''}`,
-      [{d:400,lines:[{t:'[INFO] 卸载 '+kind+' '+v+'，停止容器...',c:''}]},{d:600,lines:[{t:purge?'[INFO] --purge：清理数据目录（容器兜底）...':'[INFO] 数据目录和配置已保留',c:'dim'}]},{d:400,lines:[{t:'[OK] '+meta.title+' '+v+' 已卸载',c:'ok'}]}],
-      {doneMsg:'已卸载',onDone(){state.installed[kind]=state.installed[kind].filter(x=>x!==v);render()}});
-  });
-}
-function openExtModal(v){
-  if(!state.phpExts) state.phpExts={};
-  if(!state.phpExts[v]) state.phpExts[v]={enabled:[...PHP_EXTS],disabled:[]};
-  const st=state.phpExts[v];
-  const orig=JSON.stringify(st);
-  openModal(`<div class="modal"><div class="modal-head"><h3>PHP ${esc(v)} 扩展</h3><p>点 chip 切换 启用/停用 · 也可自行输入扩展名 · 应用后重建镜像并重载 Nginx</p></div>
-    <div class="modal-body" id="ext-body">
-      <div class="field"><label>已启用（<span id="ext-count">${st.enabled.length}</span>）— 点击 chip 停用</label><div class="quick-picks" id="ext-on"></div></div>
-      <div class="field"><label>已停用（<span id="ext-off-n">${st.disabled.length}</span>）— 点击 chip 启用</label><div class="quick-picks" id="ext-off"></div></div>
-      <div class="field"><label>添加自定义扩展</label><div style="display:flex;gap:8px"><input id="ext-add" type="text" placeholder="例如 apcu、pcntl"><button class="btn" id="ext-add-btn">添加</button></div>
-      <div class="hint">白名单 <span class="mono">a-zA-Z0-9._-</span>；新扩展在重建镜像时装入</div></div>
-      <div class="alert alert-warn">⚠ 应用后自动重建镜像并重载 Nginx（离线命中更快）</div></div>
-    <div class="modal-foot"><button class="btn" data-modal-close>取消</button><button class="btn btn-primary" id="m-ok" disabled>应用并重建</button></div></div>`);
-  const render=()=>{
-    $('#ext-on').innerHTML=st.enabled.length?st.enabled.map(e=>`<button class="pick selected" data-ext="${esc(e)}" data-dir="off" title="点击停用">✓ ${esc(e)} ×</button>`).join(''):'<span class="hint">无启用扩展</span>';
-    $('#ext-off').innerHTML=st.disabled.length?st.disabled.map(e=>`<button class="pick" data-ext="${esc(e)}" data-dir="on" title="点击启用">＋ ${esc(e)}</button>`).join(''):'<span class="hint">无停用扩展</span>';
-    $('#ext-count').textContent=st.enabled.length;
-    $('#ext-off-n').textContent=st.disabled.length;
-    $('#m-ok').disabled=JSON.stringify(st)===orig;
+    <div class="modal-body">
+      <div class="alert alert-warn">数据目录/配置/镜像/离线缓存默认全部保留。</div>
+      <div class="field"><label>卸载方式</label><div class="quick-picks"><button class="pick selected" data-purge="no">仅卸载服务</button><button class="pick" data-purge="yes">连同数据清除（--purge）</button></div></div>
+      <div class="field" id="m-purge-verify" style="display:none"><label style="display:block;color:var(--danger)">⚠ --purge 将永久删除数据目录，不可恢复 —— 输入 <b>${esc(v)}</b> 以确认：</label><input id="m-req" type="text" autocomplete="off" placeholder="${esc(v)}"></div>
+      <div class="field"><label>将执行</label><div class="cmd-preview" id="m-preview"></div></div></div>
+    <div class="modal-foot"><button class="btn" data-modal-close>取消</button><button class="btn btn-danger" id="m-ok" style="background:var(--danger-bg);border-color:rgba(255,92,92,.3)" disabled>确认卸载</button></div></div>`);
+  const upd=()=>{
+    modalCmdPreview('#m-preview',esc([kind,'uninstall',v,...(purge?['--purge']:[])].join(' ')));
+    document.getElementById('m-purge-verify').style.display=purge?'':'none';
+    $('#m-ok').disabled=purge&&($('#m-req')?.value.trim()!==v);
   };
-  $('#ext-body').onclick=e=>{
-    const b=e.target.closest('[data-ext]'); if(!b) return;
-    const n=b.dataset.ext;
-    if(b.dataset.dir==='off'){st.enabled=st.enabled.filter(x=>x!==n);st.disabled.push(n)}
-    else{st.disabled=st.disabled.filter(x=>x!==n);st.enabled.push(n)}
-    render();
-  };
-  $('#ext-add-btn').addEventListener('click',()=>{
-    const i=$('#ext-add'),n=i.value.trim();
-    if(!n)return;
-    if(!/^[a-zA-Z0-9._-]+$/.test(n)){toast('无效扩展名（白名单 a-zA-Z0-9._-）','err');return}
-    if(st.enabled.includes(n)||st.disabled.includes(n)){toast('已存在','info');return}
-    st.enabled.push(n);i.value='';render();toast(`已添加扩展 ${n}（重建时装入）`,'ok');
-  });
-  render();
+  $$('.pick').forEach(p=>p.addEventListener('click',()=>{$$('.pick').forEach(x=>x.classList.remove('selected'));p.classList.add('selected');purge=p.dataset.purge==='yes';if(purge){$('#m-req')&&($('#m-req').value='')}upd()}));
+  $('#modal-root').oninput=e=>{if(e.target.id==='m-req')upd()};
+  upd();
   $('#modal-root').onkeydown=e=>{if(e.key==='Escape')closeModal()};
   $('#m-ok').addEventListener('click',()=>{
-    const added=st.enabled.filter(e=>!PHP_EXTS.includes(e)).length;
+    if(purge&&$('#m-req').value.trim()!==v){toast('请输入版本号以确认 --purge','err');return}
     closeModal();
-    runTask(`重建 PHP ${v}（启用 ${st.enabled.length} · 停用 ${st.disabled.length}）`,
-      `phpbox php extension apply ${v} --on ${st.enabled.join(',')} --off ${st.disabled.join(',')||'-'}`,
-      [{d:400,lines:[{t:`[INFO] 1/5 写 extensions.env（启用 ${st.enabled.length}${added?` · 新增 ${added}`:''} · 停用 ${st.disabled.length}）`,c:'dim'}]},
-       {d:700,lines:[{t:'[INFO] 2/5 重建镜像（离线命中: apk+pecl 零网络）',c:'meta'}]},
-       {d:900,lines:[{t:'[INFO] 3/5 重建容器...',c:'dim'}]},
-       {d:500,lines:[{t:'[INFO] 4/5 nginx -t 校验',c:'dim'}]},
-       {d:400,lines:[{t:'[INFO] 5/5 nginx reload',c:'dim'}]},
-       {d:300,lines:[{t:`[OK] PHP ${v} 扩展已更新（启用 ${st.enabled.length} 个）`,c:'ok'}]}],
-      {doneMsg:'扩展已更新'});
+    runTask(`卸载 ${meta.title} ${v}${purge?'（含数据）':''}`,`phpbox ${kind} uninstall ${v}${purge?' --purge':''}`,
+      [{d:400,lines:[{t:'[INFO] 卸载 '+kind+' '+v+'，停止容器...',c:''}]},
+       {d:600,lines:[{t:purge?'[INFO] --purge：清理数据目录（容器兜底）...':'[INFO] 数据目录和配置已保留',c:'dim'}]},
+       {d:400,lines:[{t:'[OK] '+meta.title+' '+v+' 已卸载',c:'ok'}]}],
+      {doneMsg:'已卸载',onDone(){state.installed[kind]=state.installed[kind].filter(x=>x!==v);render()}});
   });
 }
 function openSiteAddModal(){
@@ -808,8 +786,22 @@ document.addEventListener('click',e=>{
   else if(a==='pw-reveal'){const k=act.dataset.key,id='pw-'+k.replace('.','-'),el=document.getElementById(id);if(!el)return;el.textContent=state.passwords[k]||'—';toast('8 秒后自动掩码','info',1500);setTimeout(()=>{el.textContent='••••••••'},8000)}
   else if(a==='settings-save'){const changed=$$('[data-env-key]').filter(i=>state.env[i.dataset.envKey]!==undefined&&state.env[i.dataset.envKey]!==i.value);changed.forEach(i=>state.env[i.dataset.envKey]=i.value);toast(changed.length?`已写入 .env（${changed.length} 项）`:'没有变更','ok')}
   else if(a==='restore') openRestoreModal(act.dataset.file);
-  else if(a==='backup-del'){const f=act.dataset.file;state.backups=state.backups.filter(b=>b.file!==f);render();toast('归档已删除','ok')}
-  else if(a==='run'){const t=TASKS[act.dataset.task];if(!t)return;runTask(t.label+(act.dataset.arg?' · '+act.dataset.arg:''),t.cli+(act.dataset.arg?' '+act.dataset.arg:''),t.steps,{doneMsg:'完成',onDone:t.done})}
+  else if(a==='backup-del'){const f=act.dataset.file;
+    openConfirmModal({title:'删除备份归档',desc:esc(f),
+      warnHtml:'<div class="alert alert-danger">删除后该恢复点<strong>永久丢失</strong>，无法撤销。若这是唯一备份，环境将失去回滚能力。</div>',
+      actionLabel:'删除归档',
+      onConfirm(){state.backups=state.backups.filter(b=>b.file!==f);render();toast('归档已删除','ok')}});}
+  else if(a==='run'){const t=TASKS[act.dataset.task];if(!t)return;
+    const taskLabel=t.label+(act.dataset.arg?' · '+act.dataset.arg:'');
+    const taskCli=t.cli+(act.dataset.arg?' '+act.dataset.arg:'');
+    if(act.dataset.task==='offline-prune'){
+      openConfirmModal({title:'清理离线缓存',desc:act.dataset.arg||'全部条目',
+        warnHtml:'<div class="alert alert-warn">清理后该条目将从 <span class="mono">offline/</span> 删除，<strong>下次安装将重新联网拉取并自动回写</strong>。断网期间将无法零网络安装对应版本。</div>',
+        actionLabel:'清理',
+        onConfirm(){runTask(taskLabel,taskCli,t.steps,{doneMsg:'完成',onDone:t.done})}});
+      return;
+    }
+    runTask(taskLabel,taskCli,t.steps,{doneMsg:'完成',onDone:t.done})}
 });
 document.addEventListener('change',e=>{
   const sel=e.target.closest('[data-switch]'); if(!sel) return;
