@@ -525,12 +525,14 @@ function renderOverview(){
 }
 
 const REWRITES={
-  'ThinkPHP':   {sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
   'Laravel':    {sub:'public', rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
-  'Yii':        {sub:'web',rule:"location / {\n  try_files $uri $uri/ /index.php?$args;\n}"},
-  'ThinkCMF':   {sub:'public', rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
-  'CodeIgniter':{sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?/$query_string;\n}"},
+  'ThinkPHP':   {sub:'',  rule:"if (!-e $request_filename) {\n  rewrite ^(.*)$ /index.php?s=$1 last;\n}"},
+  'Yii2':       {sub:'web', rule:"location / {\n  try_files $uri $uri/ /index.php?$args;\n}"},
+  'ThinkCMF':   {sub:'public', rule:"if (!-e $request_filename) {\n  rewrite ^(.*)$ /index.php?s=$1 last;\n}"},
+  'CodeIgniter':{sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?$query_string;\n}"},
   'WordPress':  {sub:'',  rule:"location / {\n  try_files $uri $uri/ /index.php?$args;\n}"},
+  'Discuz':     {sub:'',  rule:"location / {\n  rewrite ^([^.]*)/topic-(.+)\\.html$ $1portal.php?mod=topic&topic=$2 last;\n  rewrite ^([^.]*)/article-([0-9]+)-([0-9]+)\\.html$ $1portal.php?mod=view&aid=$2&page=$3 last;\n  rewrite ^([^.]*)/forum-(\\w+)-([0-9]+)\\.html$ $1forum.php?mod=forumdisplay&fid=$2&page=$3 last;\n  rewrite ^([^.]*)/thread-([0-9]+)-([0-9]+)-([0-9]+)\\.html$ $1forum.php?mod=viewthread&tid=$2&extra=page%3D$4&page=$3 last;\n  rewrite ^([^.]*)/group-([0-9]+)-([0-9]+)\\.html$ $1forum.php?mod=group&fid=$2&page=$3 last;\n  rewrite ^([^.]*)/space-(username|uid)-(.+)\\.html$ $1home.php?mod=space&$2=$3 last;\n}"},
+  'DedeCMS':    {sub:'',  rule:"location / {\n  rewrite ^/plus/list-([0-9]+)-([0-9]+)-([0-9]+)\\.html$ /plus/list.php?tid=$1&totalresult=$2&PageNo=$3 last;\n  rewrite ^/plus/view-([0-9]+)-([0-9]+)\\.html$ /plus/view.php?arcID=$1&pageno=$2 last;\n  rewrite ^/plus/view-([0-9]+)\\.html$ /plus/view.php?aid=$1 last;\n  rewrite ^/tags\\.html$ /tags.php last;\n  rewrite ^/search\\.html$ /search.php last;\n}"},
 };
 function openSiteLogsModal(domain){
   const site=state.sites.find(x=>x.domain===domain); if(!site) return;
@@ -563,7 +565,7 @@ function openSiteLogsModal(domain){
   let pickFw=site.rewrite;
   const showRw=()=>{
     const r=pickFw?REWRITES[pickFw]:null;
-    $('#rw-preview').innerHTML=r?`<span style="color:var(--text-mute)"># ${esc(pickFw)} 伪静态${r.sub?`（root 建议指向 ${r.sub}/）`:''}</span>\n${esc(r.rule)}`:'<span style="color:var(--text-mute)">未选择框架</span>';
+    $('#rw-preview').innerHTML=r?`<span style="color:var(--text-mute)"># ${esc(pickFw)} 伪静态${r.sub?`（root 建议指向 ${r.sub}/）`:''}</span>\n${esc(r.rule).replace(/\n/g,'<br>')}`:'<span style="color:var(--text-mute)">未选择框架</span>';
     $('#rw-note').textContent=pickFw&&REWRITES[pickFw].sub?`注意：${pickFw} 入口在 ${REWRITES[pickFw].sub}/ 子目录，应用后站点根目录将指向 ${site.root}/${REWRITES[pickFw].sub}/`:'';
     $('#rw-apply').style.display=pickFw&&pickFw!==site.rewrite?'inline-flex':'none';
   };
