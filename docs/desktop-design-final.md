@@ -29,7 +29,7 @@
 
 | 决策项 | 定案 | 状态与备注 |
 | --- | --- | --- |
-| 引擎语言 | **Go ≥ 1.22** | 定案不可动摇项 |
+| 引擎语言 | **Go 1.27.x（当前最新稳定版，2026-08 发布）**；策略=跟随最新稳定版，CI 矩阵含最新版+次新版 | 定案；注意 1.27 要求 macOS 13+；泛型方法已获语言级支持（§5.3） |
 | Docker 通信 | **Engine API（官方 SDK + `WithAPIVersionNegotiation`）**；`docker compose` / `save` / `load` 包装 CLI | 定案 |
 | 桌面壳 | **Wails v2.10+（当前）**；v3（beta，官方 2026-08-02 公告"桌面 API 已稳定"）在评估窗口复评 | 动态决策，触发器见 ADR §6 |
 | 前端 | Vue 3 + TypeScript + Vite + Naive UI + Pinia | 定案 |
@@ -79,7 +79,10 @@ phpbox-desktop/
 ├── wails.json
 ├── go.mod                         # module github.com/xiaokentrl/phpbox-desktop
 ├── Makefile                       # dev / build / parity / lint / purity / ci
+│                                   #（工具依赖用 go.mod 的 go tool 指令管理，Go 1.24+）
 ├── internal/
+│   ├── pkg/                       # 跨包共享内核（晋升制：第二个包需要时才迁入，禁 utils 垃圾场）
+│   │   ├── execx/                 #   泛型执行助手：RunJSON[T] / MapConcurrent[In,Out] / RunStream
 │   ├── app/                       # 装配层：接口→实现接线、事件桥
 │   ├── bindings/                  # Wails 绑定（薄适配 + CLI spawn 桥 + 命令透明化元数据）
 │   │   ├── services.go  sites.go  backup.go  offline.go  system.go
@@ -140,7 +143,29 @@ absent → preparing → configured → starting → healthy → committed
 
 非法迁移在运行期拒绝并记录；快照语义与 bash 回滚一致（只清本次新增，先快照存在性，绝不碰既有状态）。
 
-### 5.3 其余要点
+### 5.3 泛型使用规范（Go 1.27：泛型方法已获语言级支持）
+
+**语言事实**（go.dev 官方）：方法可声明自己的类型参数——`func (r *Rand) N[Int intType](n Int) Int`（math/rand/v2 实例）；两条硬限制：**接口方法不能声明类型参数**、**泛型方法不能用于实现接口方法**。
+
+由此推导的分层规则（宪法级约束）：
+
+| 层 | 泛型用法 | 理由 |
+| --- | --- | --- |
+| **抽象层（接口）** | **禁止**。Service / DockerClient / EventBus 接口保持非泛型 | 泛型方法无法满足接口方法——接口带泛型会让 fakes/mock 体系失效 |
+| **具体实现层** | 允许泛型方法：typed 事件包装器 `bridge.On[TaskPhase](fn)`、registry 类型化取用 `registry.Lookup[T Service](name)` | 直接调用方获得编译期类型安全，消除类型断言 |
+| **共享助手** | 泛型函数：`execx.RunJSON[T]`（compose/CLI 输出解析）、`execx.MapConcurrent[In,Out]`（并行健康巡检，errgroup） | 类型安全 + 消除样板 |
+| **反模式（禁止）** | Result/Optional 单子、泛型 Repository、Service 接口泛型化、为泛型而泛型的容器 | 非惯用；抽象靠接口不靠类型参数 |
+| **优先顺序** | 先用标准库泛型（slices/maps 1.21+、range-over-func 1.23+）再自写 | 官方实现覆盖 90% 需求 |
+
+### 5.4 公共函数定义规则（承袭 bash"公共逻辑单点实现"纪律）
+
+1. **stdlib first**：slices/maps/min/max 已覆盖的禁止手写。
+2. **晋升制**：助手先住第一个需要它的包；**第二个包需要时才晋升** internal/pkg/（首批：execx），禁止预放。
+3. **禁 utils 垃圾场**：共享包按领域命名（execx/strs/version），不做万能 utils。
+4. **移植出处保留**：自 bash 移植的函数保留"移植自 lib/xxx.sh"注释，作 parity 锚点。
+5. **失败语义**：可能阻塞/失败的助手必须带超时与错误返回。
+
+### 5.5 其余要点
 
 - `eventbus`：主题化事件（task.phase / task.log / health.changed / disk.warning），app 桥接后前端按订阅消费。
 - `docker.Client` 接口化 + `fakes.go`：bash 时代假 docker 的状态记忆语义（load 后镜像才存在）成为引擎自带测试设施。
@@ -238,3 +263,12 @@ absent → preparing → configured → starting → healthy → committed
 6. 站点首屏（Annex B §3.1）对接：列表 + 打开浏览器 + 空态。
 
 里程碑 M0 验收 = `make dev` 打开应用，总览页显示真实容器健康，`make parity` 跑通第一条对拍。
+
+---
+
+## 13. 修订记录
+
+| 版本 | 日期 | 变更 |
+| --- | --- | --- |
+| v1.0 | 2026-09-13 | 初版定稿（整合四轮分析与三份文档） |
+| v1.1 | 2026-09-13 | Go 版本策略更新至 1.27.x（官方 2026-08 发布，最新稳定 1.27.1；语言规格三变更：**泛型方法获批**、结构体字面量键放宽、函数类型推断泛化）；新增 §5.3 泛型使用规范（抽象层禁泛型方法——接口限制决定）、§5.4 公共函数规则（stdlib first/晋升制/禁 utils）；目录补 internal/pkg（execx 首批住客）；工具依赖改 go tool 指令管理 |
