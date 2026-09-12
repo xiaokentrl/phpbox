@@ -17,7 +17,7 @@ phpbox（纯 Bash 的本地 Docker LNMP 管理器，70 文件/155 函数/七闸�
 | 选项 | 结论 | 关键理由 |
 | --- | --- | --- |
 | Wails（Go + WebView） | **采用** | Docker 官方 Go SDK 是参考实现（API 版本协商/socket·named pipe 封装/事件流一等公民）；Go 心智模型与 Bash（trap/set -e → defer/error）迁移成本最低；绑定模型天然匹配"一次性命令 + 流式输出"（Tauri sidecar 模式假设长驻服务，需自定义进程管理绕行）；单进程调试便利 |
-| Tauri 2（Rust） | 备选 | bollard 社区库质量高但非官方；sidecar 模式与一次性命令语义错配；Rust 所有权范式迁移成本高；崩溃隔离优势在本规模可用 recover() + 看门狗对冲 |
+| Tauri 2（Rust） | 备选 | bollard 社区库质量高但非官方；sidecar 可执行一次性命令，但**未提供"高频短生命周期命令 + 流式输出"的开箱即用抽象**（社区 tauri-sidecar-manager 的定位恰是长驻服务），需自行封装进程管理与输出转发；Rust 所有权范式迁移成本高；崩溃隔离优势在本规模可用 recover() + 看门狗对冲 |
 | Electron | 拒绝 | 150MB+ 与"轻量本地工具"定位相悖；Docker Desktop 用 Electron 是历史包袱（其后端 com.docker.backend 为 Go 进程——先例验证的是"Go 引擎 + Web 技术 UI"的分层，而非 Electron 本身） |
 | 本地 Web 服务（Portainer 形态） | 不作主形态 | 与"桌面软件"目标冲突；引擎保持框架无关，未来经 `cmd/phpboxd` + Gin 适配层可随时补位 |
 
@@ -25,19 +25,19 @@ phpbox（纯 Bash 的本地 Docker LNMP 管理器，70 文件/155 函数/七闸�
 
 1. **语言/引擎**：Go；`internal/engine/` 纯 Go 库（不 import 任何 UI/框架包），`cmd/phpboxd` 将引擎暴露为 CLI（parity 对拍 + 高级用户入口 + 未来 server 模式挂载点）。
 2. **Docker 通信**：核心路径走 Engine API（官方 SDK + API 版本协商）；`docker compose` 与 `save/load` 仍包装 CLI（Docker Desktop 三平台自带）。
-3. **桌面壳**：**当前用 Wails v2.10+（稳定版）**；Wails v3 处于 beta（无 GA 日期），不作为起点。壳层仅 main.go + bindings 薄适配（引擎零依赖原则已定），v3 GA 后的迁移是**有界壳层任务**（Vue 前端零改动），估计 ≤2 天。
+3. **桌面壳**：**当前用 Wails v2.10+（稳定版）**；Wails v3 为 beta——官方 2026-08-02 公告原文："This is a beta release, not the final 3.0 release. The desktop API is stable and teams are already using v3 in production, but you should test thoroughly before deploying"（桌面 API 已稳定、有生产使用，但无 GA 日期；中文社区流传的"已 GA"不实）。壳层仅 main.go + bindings 薄适配（引擎零依赖原则已定），v3 GA 后的迁移是**有界壳层任务**（Vue 前端零改动），估计 ≤2 天。
 4. **Windows**：阶段 0（bash 引擎壳）只发布 Linux/macOS；Windows 随阶段 1 Go 引擎原生支持（Engine API named pipe），**不引入 WSL2 依赖**。
 5. **前端**：Vue 3 + TypeScript + Vite + Naive UI + Pinia（不变）。
 
 ## 4. 被否决的替代判断（记录理由）
 
 - "主选升级 Wails v3 Beta"：v3 对本项目实际收益有限（显式对象模型利好多窗口应用，本项目单窗口+对话框；TS 绑定注释保留是 DX 改进非决策级）；beta 对单人开发者的隐性税（文档缺口、beta 间破坏性变更、社区可搜索答案少）高于团队。引擎解耦原则使 v2→v3 成本有界，无需用 beta 换提前量。
-- "现在决定 WSL2 vs 原生"：伪决策。阶段 0 不面向 Windows 发布；阶段 1 原生支持是 Engine API 架构的自然副产物。
+- "现在决定 WSL2 vs 原生"：伪决策。阶段 0 不面向 Windows 发布；阶段 1 原生支持是 Engine API 架构的自然副产物。**条件项**：若未来公开发布且 Windows 用户占比显著，阶段 0 可追加"WSL2 预览版"（明确标注）收集反馈，而非完全跳过。
 
 ## 5. Consequences
 
 - 正面：引擎可在无窗口环境独立开发测试（`go test ./internal/engine/...` + phpboxd）；bash 七闸门 → parity 对拍；v3 迁移成本有界；Windows 原生无需 WSL。
-- 负面：v2 处于维护态（新特性不再进入）；若 v3 长期不 GA，壳层停留在 v2（对已发布桌面应用可接受——桌面依赖允许冻结）。
+- 负面：v2 处于维护态（新特性不再进入）；若 v3 长期不 GA，壳层停留在 v2（对已发布桌面应用可接受——桌面依赖允许冻结）。**托盘约束显性化**：v2 官方不支持系统托盘（维护者确认 systray 不进 v2）；临时方案 energye/systray 存在 macOS 限制（"添加菜单后不可设置图标点击处理器"）——UI 规格 v2.1 中托盘属 v2 阶段能力，v0.1~v1.1 以最小化到任务栏替代，不构成阻塞。
 - 中性：与 Docker Desktop 共存意味着 UI 空闲内存差（30 vs 60MB）无实际意义；体积与生态才是决策指标。
 
 ## 6. 重估触发条件（满足任一即重开本决策）
@@ -46,3 +46,11 @@ phpbox（纯 Bash 的本地 Docker LNMP 管理器，70 文件/155 函数/七闸�
 2. v2 出现影响核心功能且不再修复的缺陷（维护态风险兑现）。
 3. 出现多窗口/系统托盘等 v2 无法满足的硬需求 → 提前评估 v3 或原生托盘方案。
 4. bollard/Tauri 生态出现官方 Docker 背书 + 团队 Rust 能力变化 → 重开 Tauri 选项。
+5. **壳层选型评估窗口（阶段 0.5，v1.0 构建前）**：复评 v3 状态——若已 GA 或进入后期 beta（破坏性变更停止）→ 直接以 v3 构建 v1.0，跳过迁移；若仍早期 beta → 继续 v2，托盘随 v3 迁移交付。
+6. **时间检查点（2026-12-31）**：届时 v3 仍未 GA **且** v2 出现影响开发效率的阻塞问题 → 重开本决策（含 Tauri 与纯 server 形态）。
+
+---
+
+## 7. 修订记录
+
+**Amendment 1（2026-09-13，基于外部评审二）**：① v3 状态表述补官方原文（2026-08-02 公告：beta 但桌面 API 已稳定、有生产使用；纠正中文社区"已 GA"谣言）；② Tauri sidecar 论点精化（一次性命令可行，缺的是高频短命令+流式的开箱抽象）；③ 托盘约束显性化（v2 无官方托盘 + energye/systray 的 macOS 点击处理器限制）；④ 新增触发器 5/6（壳层评估窗口 + 时间检查点）；⑤ WSL2 追加公开发布条件项。核验来源：Wails 官方博客/FAQ/GitHub 状态表、Wails 维护者 leaanthony 关于 systray 不进 v2 的确认、docker client 官方文档（WithAPIVersionNegotiation 推荐）、tauri-sidecar-manager crate。
