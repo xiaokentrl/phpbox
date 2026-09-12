@@ -139,7 +139,7 @@ cmd_restore "$f" -y >"$box/restore.log" 2>&1
 [ -f "$MYSQL_DATA_ROOT/8.4/ibdata1" ] && ok "场景2 mysql 数据经容器解回复位" || bad "场景2 mysql 数据未复位"
 [ -f "$PGSQL_DATA_ROOT/17/data/PG_VERSION" ] && ok "场景2 pgsql 数据经容器解回复位" || bad "场景2 pgsql 数据未复位"
 [ -f "$FAKE_VOL_SRC/dump.rdb" ] && ok "场景2 redis 卷内容复位" || bad "场景2 卷内容未复位"
-grep -q 'dbdata-mysql' "$FAKE_DOCKER_LOG" && grep -q 'xzPf' "$FAKE_DOCKER_LOG" && ok "场景2 成员 tar 走容器解包" || bad "场景2 未走容器解包"
+grep -q 'dbdata-mysql' "$FAKE_DOCKER_LOG" && grep -q 'tar xzf' "$FAKE_DOCKER_LOG" && ok "场景2 成员 tar 走容器解包" || bad "场景2 未走容器解包"
 [ -e "$BASE_DIR"/phpbox-dbdata-*.tar.gz ] && bad "场景2 成员 tar 未清理" || ok "场景2 成员 tar 用后即清"
 
 # ---- 场景 3：危险归档拒绝（含 .. 的成员）----

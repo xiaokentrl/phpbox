@@ -80,6 +80,9 @@ cmd_restore() {
   local auto_yes=false
   [ "${2:-}" == "-y" ] && auto_yes=true
   [ -f "$f" ] || error "备份文件不存在: $f"
+  # 归一化为绝对路径：后半段 (cd / && tar ...) 切到根目录执行，相对路径会在
+  # 校验通过后的解包步骤才失败（实测踩坑），必须提前锚定
+  f=$(_get_abs_path "$f")
 
   local content=$(tar -tzf "$f" | head -n 20)
   if ! $auto_yes; then
@@ -112,7 +115,10 @@ cmd_restore() {
   _phpbox_stop_svc redis
 
   log "恢复备份..."
-  (cd / && tar -xzPf "$f" --no-same-owner --no-same-permissions)
+  # -m 不还原时间戳：归档里可能含容器写入过的 root 属主目录（如 www 下），
+  # 宿主 tar 对它们 utime 必 EPERM 并整体退出（实测踩坑）；与 --no-same-permissions
+  # 同一取向——属主/权限/时间戳在宿主侧一律不还原，数据库数据由容器 root 解包保留属主
+  (cd / && tar -xmzPf "$f" --no-same-owner --no-same-permissions)
 
   _restore_volumes "$auto_yes" "${vol_files[@]}"
 
@@ -134,8 +140,10 @@ cmd_restore() {
       fi
     done < <(tar -tzf "$BASE_DIR/$vf")
     log "恢复数据库数据目录: $vf（容器内 root，保留 uid 属主）"
+    # busybox tar 无 -P（组合选项串里出现即打印 usage 退出，实测踩坑）；
+    # 成员本就是相对路径（打包时 -C /host home/...），无需 P
     docker run --rm -v /:/host -v "$BASE_DIR":/backup:ro alpine \
-      tar xzPf "/backup/$vf" -C /host
+      tar xzf "/backup/$vf" -C /host
     rm -f "$BASE_DIR/$vf"
   done
 

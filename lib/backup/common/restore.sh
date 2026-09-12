@@ -65,7 +65,8 @@ _restore_volumes() {
       [[ "$confirm" != "y" ]] && { log "跳过"; continue; }
     fi
     docker volume create "$vname" &>/dev/null || true
-    docker run --rm -v "$vname":/target -v "$BASE_DIR":/backup alpine tar xzPf "/backup/$vf" -C /target --no-same-owner --no-same-permissions
+    # busybox tar 无 -P（组合即 usage 退出，存量 bug——卷恢复从未成功过）；成员为相对路径无需 P
+    docker run --rm -v "$vname":/target -v "$BASE_DIR":/backup alpine tar xzf "/backup/$vf" -C /target --no-same-owner --no-same-permissions
     rm -f "$BASE_DIR/$vf"
   done
 }
