@@ -244,6 +244,7 @@ $HOME/phpbox/
 ├── cache/go/<版本>/               # Go GOPATH 模块和工具缓存
 ├── backups/                      # 备份归档
 ├── logs/                         # Nginx 与 PHP 日志
+├── docs/                         # 规划文档（桌面版 UI 规格）
 └── .env                          # 环境变量（用户可修改）
 ```
 
@@ -518,6 +519,7 @@ $HOME/phpbox/
 ├── cache/go/<version>/           # Go GOPATH module and tool caches
 ├── backups/                      # backup archives
 ├── logs/                         # Nginx and PHP logs
+├── docs/                         # planning docs (desktop UI spec)
 └── .env                          # environment variables (user-editable)
 ```
 

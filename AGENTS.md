@@ -173,6 +173,7 @@ phpbox/
 ├── backups/                      # 备份归档
 ├── tests/                        # 结构、语法和行为回归测试
 ├── .github/                      # AI 指令、Skill、Agent、Prompt 和 Hook
+├── docs/                         # 规划文档（desktop-ui-spec-v2：桌面版 UI 规格，待迁 phpbox-desktop）
 ├── install.sh                    # 安装和初始化入口
 ├── AGENTS.md                     # 项目总纲
 ├── README.md                     # 用户文档
