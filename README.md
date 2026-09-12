@@ -189,7 +189,7 @@ phpbox go logs / stop / env <项目>
 | 命令 | 说明 |
 | --- | --- |
 | `phpbox list` | 列出所有已安装服务 |
-| `phpbox backup` | 备份（暂停 MySQL/Redis 后打包 `.env`、`config/`、`offline/`、站点源码、MySQL 数据目录与数据卷） |
+| `phpbox backup` | 备份（暂停 MySQL/PostgreSQL/Redis 后打包 `.env`、`config/`、`offline/`、站点源码、Docker 卷；数据库数据目录借容器 root 打包为成员 tar，保留原始 uid 属主） |
 | `phpbox restore <备份文件> [-y]` | 恢复（拒绝含 `..` 的危险归档路径；`-y` 非交互） |
 | `phpbox help` | 全部命令 |
 
@@ -472,7 +472,7 @@ Uninstalling an image still used by a project container is refused — `phpbox g
 | Command | Description |
 | --- | --- |
 | `phpbox list` | List all installed services |
-| `phpbox backup` | Backup (pauses MySQL/Redis, then archives `.env`, `config/`, `offline/`, site sources, MySQL data, and volumes) |
+| `phpbox backup` | Backup (pauses MySQL/PostgreSQL/Redis, then archives `.env`, `config/`, `offline/`, site sources, and Docker volumes; database data directories are packed via a root container as member tars to preserve original uid ownership) |
 | `phpbox restore <file> [-y]` | Restore (archives containing `..` paths are rejected; `-y` = non-interactive) |
 | `phpbox help` | Full command list |
 

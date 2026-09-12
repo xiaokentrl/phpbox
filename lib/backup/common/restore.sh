@@ -13,7 +13,18 @@ _restore_list_vol_files() {
   done < <(tar -tzf "$1")
 }
 
-# 校验归档成员路径：拒绝任何含 .. 的条目；只允许落在 BASE_DIR/WWW_ROOT/MYSQL_DATA_ROOT 内。
+# 扫描归档中需要恢复的数据库数据目录成员 tar（stdout 输出 basename 列表）
+_restore_list_dbdata_files() {
+  local line
+  while IFS= read -r line; do
+    # 命名 phpbox-dbdata-<服务>.tar.gz 与卷 tar（phpbox_）刻意区分，互不误配
+    if [[ "$line" =~ ${PROJECT_NAME}-dbdata-.*\.tar\.gz$ ]]; then
+      basename "$line"
+    fi
+  done < <(tar -tzf "$1")
+}
+
+# 校验归档成员路径：拒绝任何含 .. 的条目；只允许落在 BASE_DIR/WWW_ROOT/MYSQL_DATA_ROOT/PGSQL_DATA_ROOT 内。
 # 结果写入全局数组 RESTORE_INVALID_PATHS
 _restore_collect_invalid_paths() {
   local f=$1
@@ -34,7 +45,8 @@ _restore_collect_invalid_paths() {
     fi
     if [[ "$abs_path" != "$BASE_DIR"/* && "$abs_path" != "$BASE_DIR" && \
         "$abs_path" != "$WWW_ROOT"/* && "$abs_path" != "$WWW_ROOT" && \
-        "$abs_path" != "$MYSQL_DATA_ROOT"/* && "$abs_path" != "$MYSQL_DATA_ROOT" ]]; then
+        "$abs_path" != "$MYSQL_DATA_ROOT"/* && "$abs_path" != "$MYSQL_DATA_ROOT" && \
+        "$abs_path" != "$PGSQL_DATA_ROOT"/* && "$abs_path" != "$PGSQL_DATA_ROOT" ]]; then
       RESTORE_INVALID_PATHS+=("$path")
     fi
   done < <(tar -tzf "$f")

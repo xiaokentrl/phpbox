@@ -16,8 +16,9 @@ cmd_backup() {
   trap 'rm -rf "$tmpd"; for vf in "${vol_files[@]}"; do rm -f "$BASE_DIR/$vf"; done; _phpbox_start_stopped' EXIT
 
   log "备份进行中..."
-  log "暂停 MySQL/Redis 容器以保证数据一致性..."
+  log "暂停 MySQL/PostgreSQL/Redis 容器以保证数据一致性..."
   _phpbox_stop_svc mysql
+  _phpbox_stop_svc pgsql
   _phpbox_stop_svc redis
 
   # 备份 Docker 命名卷（目前只有 Redis 使用）
@@ -37,14 +38,22 @@ cmd_backup() {
   if [ -d "$WWW_ROOT" ]; then
     backup_items+=("$WWW_ROOT")
   fi
-  # 增加 MySQL 数据目录（宿主机路径）
-  if [ -d "$MYSQL_DATA_ROOT" ]; then
-    backup_items+=("$MYSQL_DATA_ROOT")
-  fi
-  # PostgreSQL 数据目录（宿主机路径；与 mysql 同一打包机制）
-  if [ -d "$PGSQL_DATA_ROOT" ]; then
-    backup_items+=("$PGSQL_DATA_ROOT")
-  fi
+  # 数据库数据目录（mysql/pgsql）：数据文件归容器内 uid（999/70），宿主 tar 无读权限
+  # （实测 tar 退出码 2 整体失败）。与数据卷同款机制：借一次性容器以 root 只读挂载根
+  # 目录打包成成员 tar（phpbox-dbdata-<服务>.tar.gz，内含相对根目录的绝对路径），
+  # 随后走下方统一的收集循环进宿主归档；恢复侧同样借容器 root 解包以保留原始属主
+  local db_roots=() db_entry db_src db_name
+  [ -d "$MYSQL_DATA_ROOT" ] && db_roots+=("mysql:$MYSQL_DATA_ROOT")
+  [ -d "$PGSQL_DATA_ROOT" ] && db_roots+=("pgsql:$PGSQL_DATA_ROOT")
+  for db_entry in "${db_roots[@]:-}"; do
+    [ -n "$db_entry" ] || continue
+    db_src="${db_entry#*:}"
+    [ -n "$(ls -A "$db_src" 2>/dev/null)" ] || continue   # 空目录无数据可备，跳过
+    db_name="phpbox-dbdata-${db_entry%%:*}.tar.gz"
+    log "打包 ${db_entry%%:*} 数据目录（容器内 root，保留 uid 属主）: $db_src"
+    docker run --rm -v /:/host:ro -v "$tmpd":/backup alpine \
+      tar czf "/backup/$db_name" -C /host "${db_src#/}"
+  done
 
   for vf in "$tmpd"/*.tar.gz; do
     [ -f "$vf" ] || continue   # glob 无匹配时保持字面串，靠 -f 过滤掉
@@ -95,16 +104,40 @@ cmd_restore() {
   # 路径校验先行（安全检查不依赖 daemon），通过后再要求 daemon 用于停服/恢复卷
   require_docker
 
-  log "停止 MySQL/Redis 容器以便安全恢复..."
+  log "停止 MySQL/PostgreSQL/Redis 容器以便安全恢复..."
   PHPBOX_STOPPED=()
   trap '_phpbox_start_stopped' EXIT
   _phpbox_stop_svc mysql
+  _phpbox_stop_svc pgsql
   _phpbox_stop_svc redis
 
   log "恢复备份..."
   (cd / && tar -xzPf "$f" --no-same-owner --no-same-permissions)
 
   _restore_volumes "$auto_yes" "${vol_files[@]}"
+
+  # 数据库数据目录成员 tar：宿主 tar 提取时已落回 $BASE_DIR（上面主归档解包），
+  # 此处先校验成员内部路径（防越界解包），再借容器 root 解到绝对路径——root 解包
+  # 保留归档内 uid（999/70），宿主解包会把数据文件变成宿主属主，服务起不来
+  local db_files=() vf inner db_rel
+  mapfile -t db_files < <(_restore_list_dbdata_files "$f")
+  for vf in "${db_files[@]:-}"; do
+    [ -n "$vf" ] || continue
+    [ -f "$BASE_DIR/$vf" ] || continue
+    while IFS= read -r inner; do
+      [ -n "$inner" ] || continue
+      if [[ "$inner" == *".."* ]]; then
+        error "成员 tar $vf 含非法路径: $inner"
+      fi
+      if ! [[ "$inner" == "${MYSQL_DATA_ROOT#/}/"* || "$inner" == "${PGSQL_DATA_ROOT#/}/"* ]]; then
+        error "成员 tar $vf 路径越界: $inner（只允许数据库数据目录内容）"
+      fi
+    done < <(tar -tzf "$BASE_DIR/$vf")
+    log "恢复数据库数据目录: $vf（容器内 root，保留 uid 属主）"
+    docker run --rm -v /:/host -v "$BASE_DIR":/backup:ro alpine \
+      tar xzPf "/backup/$vf" -C /host
+    rm -f "$BASE_DIR/$vf"
+  done
 
   _phpbox_start_stopped
 

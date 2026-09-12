@@ -101,6 +101,7 @@ _redis_purge
 _redis_show_list
 _redis_uninstall
 _restore_collect_invalid_paths
+_restore_list_dbdata_files
 _restore_list_vol_files
 _restore_volumes
 _rm_rf_with_docker_fallback
