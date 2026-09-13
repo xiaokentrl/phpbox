@@ -61,7 +61,8 @@ flowchart TD
 
 - **请求/响应**：前端 → Wails 绑定（进程内函数调用，无 HTTP 层）→ engine 方法。
 - **推送**：engine `eventbus` → app 事件桥 → `EventsEmit` → Pinia/composables。主题：`task.phase` / `task.log` / `health.changed` / `disk.warning`。
-- **阶段 0 桥接**：engine 未 Go 化的模块由 bindings spawn bash `phpbox` CLI，**以日志行推断九态**（解析规则 = bindings 层可配置映射表，标记集契约冻结见 §12.10）；推断失败降级显示原始日志，不臆造状态。
+- **阶段 0 桥接**：engine 未 Go 化的模块由 bindings spawn bash `phpbox` CLI，**以日志行推断九态**。
+  标记集契约（冻结）：标记 = `[INFO]` `[OK]` `[ERR]` `[WARN]` + 阶段关键词（如 初始化/命中/构建开始/安装完成）；解析映射表位于 bindings 层（模式 → 九态）；bash 侧输出格式变更必须先改映射表并回归。推断失败降级显示原始日志，不臆造状态。（原 §12.10 交叉引用为错位引用，已更正——§12.10 实为长操作截止时间条款。）
 
 ### 3.3 依赖规则（CI 强制，`make purity` = `go list -deps ./internal/engine/... | grep -i wails` 有输出即失败）
 
@@ -444,3 +445,4 @@ export interface TaskState { id: string; label: string; cliPreview: string;
 | v2.0 | 2026-09-13 | **全量自包含版**：整合 Annex A/B 全部技术细节——各服务线细节（§6）、备份恢复（§7）、安全与插件体系（§9）、UI 全量（§10）、行为保持清单（§12.2）、故障模式库（§15）；本文成为唯一日常阅读文档，Annex A/B 保留为决策过程记录 |
 | v2.1 | 2026-09-13 | 触发器 #3 触发（用户确认托盘硬需求）→ 评估后决策：维持 v2 + energye/systray（Linux/Windows，v0.1 交付），macOS 托盘随 v3 迁移；新增托盘设计（菜单/图标状态/生命周期/单实例）与 R9；TrayProvider 接口隔离 |
 | v2.2 | 2026-09-13 | 对齐 ADR Amendment 4：桌面壳 v2→**v3 Beta**（锁定版本）；托盘升三平台 v0.1（v3 原生）；路线图阶段 0 换 v3 骨架、M3 移除 macOS 托盘补齐项；R1 改写；构建工具补 Taskfile（wails3 惯例） |
+| v2.3 | 2026-09-13 | 修正标记集契约错位交叉引用（原指向 §12.10"长操作截止时间"条款）并在 §3.2 内联契约定义（标记集/映射表位置/冻结规则） |
