@@ -519,6 +519,10 @@ PostgreSQL 服务线（B 导航缺）· 设置页（B 缺）· 离线缓存页�
 1. **"主选切换 Wails v3 Beta"**——前提不成立：其论据"托盘是 v1.0 硬需求"误读本文档，托盘在 §9 中属 v2 阶段且 v1 期以最小化到任务栏替代；ADR-001 §6 触发器 3 已覆盖"托盘等 v2 无法满足的硬需求提前出现"的情形，届时按有界迁移评估。其"systray 生命周期问题"的技术判断本身准确，予以记录。
 2. **"PostgreSQL 降级到 v1.1+ 并在 §10 标注引擎待新增"**——事实错误：bash 引擎已完整支持 pgsql（lib/pgsql/ 五文件，安装/卸载/离线事务/备份集成均已端到端验证），§10 未列 pgsql 恰因引擎已具备。其建议中"移植状态表跟踪"的合理部分由既定的 `docs/migration.md` 计划承担（所有线的 Go 移植统一跟踪，非 pgsql 特有）。
 
+### 11.7 UI 原型终定稿采纳入库（2026-09-13）
+
+外部制作的 HTML 原型经全量质检（node --check + 浏览器 11 视图巡检 + 交互链路实测）后采纳为 `docs/ui-preview/index.html` 正式预览。相对 v2.1 的增量：① 主题重命名 dark→midnight、新增 **forest** 主题（共 6 主题：midnight/light/oled/forest/ocean/sakura），每主题含独立 ok/warn/danger 色与 `color-scheme` 声明（原生控件跟随）；② **侧边栏宽度可拖拽**、任务抽屉高度可拖拽（setupDrawerResize）；③ 危险确认统一为 openDangerConfirm（含输入验证二段式）；④ 伪静态框架扩展为 9 项（none/laravel/thinkphp/yii2/thinkcmf/ci/symfony/wordpress/custom）；⑤ 命令预览引擎 buildScript + applyStateChange 状态应用层 + playTask 任务流播放器；⑥ 备份归档行内下载/恢复/删除 + pick-folder 目录选择。UI 规格正文与原型细节如有出入，以原型实现为准回写本文。
+
 ### 11.5 准确性声明
 
 - 本文所有引擎现有能力（扩展重建五步、端口顺延、密码入 `.env`、备份容器打包、`-m` 解包、busybox 规避等）均对应当前 bash 代码真实行为。
