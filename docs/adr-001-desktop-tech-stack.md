@@ -61,3 +61,29 @@ phpbox（纯 Bash 的本地 Docker LNMP 管理器，70 文件/155 函数/七闸�
 评估：① v2 无官方托盘（维护者确认）；② v2 + energye/systray 在 **macOS 存在 AppDelegate 冲突（链接错误，Issue #1521）**，维护者在 Issue #1010 原话 "Running systray and Wails together is basically impossible"；社区补丁 ra1phdd/systray-on-wails 存在但维护性存疑；③ **Linux/Windows 下 energye/systray 与 v2 组合可用**（冲突仅 macOS）；④ Wails v3 内置原生托盘（官方文档）。
 
 决策：**维持 v2，托盘经 energye/systray 实现，范围 Linux/Windows（v0.1 交付）；macOS 托盘随 v3 迁移交付**。理由：用户主力平台 Linux（energye 路径完全可用）；v3 beta 税（Amendment 1 论证）对单人开发仍高于"macOS 托盘延后"的代价；托盘实现隔离在 internal/app/tray（TrayProvider 接口），v3 迁移时仅换实现、菜单定义零改动。若 macOS 托盘提前成为硬需求 → 触发器 5（评估窗口）提前，按有界迁移切换 v3。
+
+**Amendment 4（2026-09-13，触发器 #3 深化评估：托盘升级为一级产品能力 → 桌面壳切换 Wails v3 Beta）**
+
+背景：外部规约 v2.0 将托盘从"图标"升格为一级产品能力（§6：服务状态菜单/最近任务/关闭到托盘生命周期/通知联动/图标状态指示），并提议桌面壳直接采用 Wails v3 Beta。原 Amendment 3 决策（v2 + energye/systray）被重新评估。
+
+关键事实（本次核验）：
+
+- macOS：v2 + energye 因 AppDelegate 冲突**完全不可用**（Issue #1521）——"跨平台"产品目标下，v2 路径在 macOS 结构性断裂。
+- Linux：Wails v3 托盘依赖 GTK3 + libayatana-appindicator3，**目标机已装（ldconfig 实测确认）**；energye 依赖同一批库，依赖面持平。
+- 时机：引擎尚未 Go 化、壳层零代码——"迁移 ≤2 天"的论据此刻处于**最强时点**：从 v3 起步彻底避免未来迁移；beta 税只落在薄壳层。
+- v3 桌面 API 官方声明稳定，已有团队生产使用（2026-08-02 公告，Amendment 1 已核验）。
+
+决策：**桌面壳切换为 Wails v3 Beta（go.mod 锁定具体 beta 版本），废止 Amendment 3 的 v2 + energye 路径**。
+
+缓解措施（对 beta 税的对冲）：
+
+- 壳层保持薄（main.go + bindings），引擎零依赖原则不变——beta 破坏性变更的爆炸半径 = 壳层。
+- beta 版本显式锁定；升级为独立决策（读 release notes + 回归测试），不做自动跟随。
+- 回退路径保留：本 ADR 历史完整记录 v2 方案；若 v3 出现阻塞性缺陷，引擎零改动降级 v2。
+- Linux 前置依赖（GTK3/libayatana）写入安装前置文档与 §6.7 式降级提示。
+
+对 Amendment 3 的取代说明：其"beta 税 vs macOS 延后"权衡在"托盘=一个图标"的前提下成立；当托盘升为一级产品能力（状态菜单/最近任务/关闭到托盘/通知联动），前提改变，结论随之改变——在"什么都还没写"的时点，从最终框架起步是总成本最低的路径。energye 依赖废弃。
+
+触发器 5/6（评估窗口/时间检查点）随本决策消化；新增回看点：**v3 项目停滞（≥12 个月无 beta 更新）且出现阻塞 → 重估（含回退 v2）**。
+
+流程备注：外部规约 v2.0 声称"已在 ADR-001 Amendment 4 记录理由"——经核验该记录当时并不存在，本 Amendment 为补写（事实在先、记录在后），并对外部文档的无据断言予以更正。
