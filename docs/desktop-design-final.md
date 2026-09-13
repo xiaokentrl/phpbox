@@ -44,7 +44,7 @@
 | 桌面壳 | **Wails v3 Beta（go.mod 锁定具体 beta 版本）** | 【ADR-001 Amendment 4】托盘升为一级产品能力（用户硬需求）+ macOS v2 托盘结构性不可用 + 零代码时点 → 从 v3 起步总成本最低。beta 税缓解：薄壳层/版本锁定/回退路径保留。桌面 API 官方声明稳定 |
 | 前端 | Vue 3 + TypeScript + Vite + Naive UI + Pinia | Naive UI：TS 优先/树摇/暗色主题/开发工具气质 |
 | 特权操作 | 平台分支助手：Linux `pkexec` / macOS `osascript`（或 launchd helper） / Windows `Start-Process -Verb RunAs` | 目前唯一特权点 = hosts 编辑 |
-| 系统托盘 | **Wails v3 原生 SystemTray（三平台，v0.1 交付）** | Linux 依赖 GTK3+libayatana（目标机实测在位）；菜单/图标规格见规约 v2.0 §6 |
+| 系统托盘 | **Wails v3 原生 SystemTray（三平台，v0.1 交付）** | Linux 构建/运行依赖 GTK4 + webkitgtk-6.0 + libayatana（实测 beta.20 默认 GTK4 栈）；菜单/图标规格见规约 v2.0 §6 |
 | 先例 | Docker Desktop = Electron 前端 + Go 后端（com.docker.backend，gRPC） | 验证"Go 引擎 + Web 技术 UI"分层；无官方 Go→Rust 重写公告（已核验） |
 | 备选/拒绝 | Tauri 2 备选（sidecar 缺"高频短命令+流式"开箱抽象；energye/systray 类第三方托盘有 macOS 菜单-点击处理器互斥限制）；Electron 拒绝（150MB+ 与轻量定位相悖） | 重估触发器见 ADR §6 |
 

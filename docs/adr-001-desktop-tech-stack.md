@@ -80,7 +80,9 @@ phpbox（纯 Bash 的本地 Docker LNMP 管理器，70 文件/155 函数/七闸�
 - 壳层保持薄（main.go + bindings），引擎零依赖原则不变——beta 破坏性变更的爆炸半径 = 壳层。
 - beta 版本显式锁定；升级为独立决策（读 release notes + 回归测试），不做自动跟随。
 - 回退路径保留：本 ADR 历史完整记录 v2 方案；若 v3 出现阻塞性缺陷，引擎零改动降级 v2。
-- Linux 前置依赖（GTK3/libayatana）写入安装前置文档与 §6.7 式降级提示。
+- Linux 前置依赖写入安装前置文档与 §6.7 式降级提示。
+
+**Amendment 4 补充（同日，首次 Linux 构建实测）**：① wails3 doctor 报 ready 为**误报**——未检查编译链；实测根因链：gcc 未装 → Go 自动 CGO_ENABLED=0 → wails linux 文件（`pointer` 定义于 cgo 标签下）全部 undefined；pkg-config 与开发头文件亦缺。② **Linux 构建前置实测修正**：wails v3 beta.20 默认 **GTK4 + webkitgtk-6.0**（非 v2 时代 GTK3 栈）——`sudo apt install build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev`；托盘另需 libayatana-appindicator3（含 -dev）。③ 引擎纯 Go 部分不受影响（phpboxd list 正常）。
 
 对 Amendment 3 的取代说明：其"beta 税 vs macOS 延后"权衡在"托盘=一个图标"的前提下成立；当托盘升为一级产品能力（状态菜单/最近任务/关闭到托盘/通知联动），前提改变，结论随之改变——在"什么都还没写"的时点，从最终框架起步是总成本最低的路径。energye 依赖废弃。
 
