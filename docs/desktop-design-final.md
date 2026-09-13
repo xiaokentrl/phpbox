@@ -112,7 +112,7 @@ phpbox-desktop/
 ├── test/parity/                   # bash phpbox ↔ phpboxd 对拍
 ├── scripts/                       # gen-mocks / check-engine-purity / release
 ├── .github/workflows/             # ci.yml（三平台矩阵 + purity + Go 1.27/1.26）+ parity.yml
-├── docs/                          # architecture / migration 状态表 / ui-spec
+├── docs/                          # architecture / migration 状态表 / ui-spec / ui-guidelines（前端约束）
 └── AGENTS.md
 ```
 
