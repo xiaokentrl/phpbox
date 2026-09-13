@@ -1,5 +1,10 @@
 # phpbox
 
+> **项目状态（2026-09-13）**：本仓（bash CLI）已冻结为**参考实现**——只修复致命缺陷，不再新增功能。
+> 演进主线已迁移至 **phpbox Desktop**（Wails v3 + Go 引擎 + Vue 3，仓库 `phpbox-desktop`）。
+> 两引擎通过 parity 对拍测试保持行为一致；本仓的七闸门测试继续作为迁移验收锚点。
+
+
 **中文** | [English](#english)
 
 多版本 Docker 开发环境管理器（LNMP + Go）。纯 Bash 实现，一条命令装好 PHP / MySQL / Redis / Nginx：多版本共存、随时切换、互不干扰；构建支持离线缓存，断网也能重装；每个长操作都有阶段日志、超时边界和失败回滚。

@@ -6,6 +6,16 @@
 
 ---
 
+## 0. 定案记录（2026-09-13，用户拍板）
+
+| 决策 | 定案 | 影响 |
+| --- | --- | --- |
+| 产品定位 | **开源工具**（MIT），自用优先、可公开发布 | README 双语、LICENSE、安装前置文档必备；签名/自动更新推迟 |
+| 语言 | 中文默认 + en-US 必须完整（规约 §11.1） | en 文案由 AI 出初稿 |
+| bash 引擎角色 | **冻结为参考实现**：只修致命缺陷；桌面版唯一演进线；parity 对拍=迁移验收 | bash 仓 README 已注记 |
+| v0.1 服务线范围 | PHP + MySQL + Nginx 三线打样（黄金路径）；pgsql/redis/go 随后 | 决定 M0.5 交付顺序 |
+| 仓库 | 新仓 `~/phpbox-desktop`（module `github.com/xiaokentrl/phpbox-desktop`），MIT；设计文档随迁 | bash 仓保留为 CLI 参考与 parity 基准 |
+
 ## 1. 项目定位
 
 把 phpbox（纯 Bash 的本地 Docker 多版本开发环境管理器：PHP/MySQL/PostgreSQL/Redis/Nginx/Go + 站点 + 离线缓存 + 备份）升级为跨平台桌面应用。bash CLI 保留为高级用户入口与过渡期引擎。
@@ -446,3 +456,4 @@ export interface TaskState { id: string; label: string; cliPreview: string;
 | v2.1 | 2026-09-13 | 触发器 #3 触发（用户确认托盘硬需求）→ 评估后决策：维持 v2 + energye/systray（Linux/Windows，v0.1 交付），macOS 托盘随 v3 迁移；新增托盘设计（菜单/图标状态/生命周期/单实例）与 R9；TrayProvider 接口隔离 |
 | v2.2 | 2026-09-13 | 对齐 ADR Amendment 4：桌面壳 v2→**v3 Beta**（锁定版本）；托盘升三平台 v0.1（v3 原生）；路线图阶段 0 换 v3 骨架、M3 移除 macOS 托盘补齐项；R1 改写；构建工具补 Taskfile（wails3 惯例） |
 | v2.3 | 2026-09-13 | 修正标记集契约错位交叉引用（原指向 §12.10"长操作截止时间"条款）并在 §3.2 内联契约定义（标记集/映射表位置/冻结规则） |
+| v2.4 | 2026-09-13 | 新增 §0 定案记录（开源定位/bash 冻结/三线打样/新仓与 MIT）；本文档随迁 phpbox-desktop |
