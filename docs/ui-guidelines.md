@@ -727,59 +727,148 @@ i18n 同步要求：任何新增 UI 文案，必须在 zh-CN.json5 和 en-US.jso
 
 看目录名就知道它属于哪条线，看颜色就知道它是什么状态，看按钮就知道下一步做什么，看 Toast 就知道刚才发生了什么，看语言就知道用户在哪，看托盘就知道服务是否健康。
 
-## 22. 统一组件化与跨平台一致性（v2.1 新增）
+## 22. 组件化体系（v2.2 校准版：分层与契约强制，治理裁剪）
 
-### 22.1 组件化架构（强制）
+### 22.1 组件分层与依赖方向（强制）
 
-**组件三层，职责不越界**：
+| 层 | 目录 | 职责 | 允许依赖 | 禁止依赖 |
+| --- | --- | --- | --- | --- |
+| L0 · Token | src/styles/tokens.css + themes.css | CSS 变量（语义层）、断点、动效时长 | 无 | 所有组件 |
+| L1 · 基础组件 | src/components/base/ | 无业务语义的基础元素（含 L2 分子特征者并入） | L0 | 业务组件 / stores / api |
+| L2 · 业务组件 | src/components/ | 有业务语义的组合单元 | L0/L1 | 页面间互相引用 |
+| L3 · 视图 | src/views/ | 完整页面 | L0–L2 + stores + api | —— |
 
-| 层 | 位置 | 内容 | 规则 |
-| --- | --- | --- | --- |
-| 基础组件 | src/components/base/ | BaseButton / BaseChip / StatusPill / BaseModal / EmptyState / BaseField / LogViewer | 全项目唯一样式实现；包装 Naive UI 时必须透传主题 |
-| 业务组件 | src/components/ | ServiceCard / VersionCard / SiteRow / ConnectionDrawer / DiagnosePanel / BackupRow / OfflineTree | 只组合基础组件与 api 层数据 |
-| 视图 | src/views/ | 页面装配 | 禁止手写重复 UI 模式——出现即违反本条 |
+校准说明：原外部草案的 atoms/molecules 四层 taxonomy 保留为**词汇**（原子/分子特征明显时可分目录），v0.1 先合并为 base/ 随用随分——目录结构为实现服务，不为分类学服务。
 
-**组件契约（每条都可在 code review 中机械判定）**：
+约束：禁止 L1 import 业务组件；禁止跨视图互相引用（复用逻辑下沉 L2 或 composables）；禁止在基础组件里 import stores 或 api；【修正】L3 视图**可用语义 Token 做布局**（原草案"页面禁用 Token"过严会反噬——布局间距永远需要 Token），组件视觉 Token 归组件。
 
-1. 数据进、事件出：props 进 / defineEmits 出；组件内禁止直接调 src/api/（数据由视图层传入）。
-2. 组件内禁止平台检测（navigator.userAgent / process.platform 判断 = 违规）——平台差异只允许在 internal/platform 与 src/api 的降级链里（§13）。
-3. **单点实现**：同一 UI 模式（危险确认 / 空状态 / 连接抽屉 / 日志视图 / 伪静态弹窗）全项目只能有一个实现——openDangerConfirm 是先例，不是特例。
-4. **晋升制**（与引擎 internal/pkg 同构）：视图私有片段被第二次复用前保持私有，第二次复用时必须晋升为公共组件；禁止预放。
-5. 公共组件必须带类型化 defineProps / defineEmits / 插槽注释（props 含义、事件载荷结构）。
+### 22.2 组件契约（强制，全文最高价值条款）
 
-### 22.2 跨平台一致性（强制）
+Props 必须类型化 + JSDoc + 默认值；禁 any/unknown；布尔 prop 命名禁 isXxx。Events 必须 defineEmits<T>() 类型化、camelCase、v-model 用 update:modelValue、禁透传原生事件。Slots 用 defineSlots<T>() 类型化、语义命名（header/footer/actions，禁 slot1）。
 
-**WebView 引擎事实**：Windows = WebView2（Chromium）；macOS = WKWebView（WebKit）；Linux = WebKitGTK（WebKit）。三引擎渲染差异是所有一致性规则的出处。
+禁止的组件模式（每条都可在 review 中机械判定）：
 
-**六条一致性规则**：
+| 模式 | 为什么禁止 |
+| --- | --- |
+| props: ['a','b'] 无类型 | 失去类型检查 |
+| emit('click') 透传原生事件 | 语义混乱 |
+| 组件内 window.xxx | 破坏跨平台一致性 |
+| 组件内直接 fetch/axios | 违反引擎零依赖（走 src/api） |
+| 组件内 localStorage 直读写 | 经 composable 封装 |
+| 组件内 document.querySelector | 破坏封装（用 template ref） |
+| 组件内业务逻辑（版本比较除外） | 违反 §14.3 |
 
-1. **单一 CSS 源**：全项目只有一份样式；平台分支只允许 `-webkit-` 前缀（如 `-webkit-backdrop-filter`）与 `@supports` 查询，禁止按 UA 写不同样式表。
-2. **原生控件一律接管**：select / checkbox / 滚动条 已按 `appearance: none` + 自定义样式实现（含 `::-webkit-scrollbar`），禁止裸用浏览器默认外观。
-3. **字体只用 §4.4 栈**：禁止按平台加载不同字体文件；字号 px 定义（三引擎渲染差异用断点吸收，不用 em/rem 补偿）。
-4. **格式化只走 Intl**（§11.7）：日期/数字/文件大小禁止手写拼接——三引擎的 `toLocaleString` 默认输出不同。
-5. **平台能力只经两层出口**：绑定层（桌面能力）与 src/api 降级链（浏览器能力）；组件与视图层出现平台 if/else = 违规。
-6. **视觉回归**：CI 三平台矩阵对 关键视图 × 全部主题 截图比对（感知哈希阈值容差）；新增公共组件必须附三平台截图。
+### 22.3 命名与 SFC 结构（强制）
 
-**已知平台差异清单**（显式记录，禁止隐性分歧）：
+文件/组件 PascalCase 且一致（P 前缀：PButton，避开 Naive 的 N 前缀）；CSS 类 kebab-case + p- 前缀；Props/Events/Slots camelCase。SFC 内顺序强制：imports → 类型定义 → defineProps/Emits/Slots → 响应式状态 → 生命周期 → 方法 → defineExpose。必须 `<script setup lang="ts">` + `<style scoped>`；禁无 scoped 改全局样式。
 
-| 差异 | 事实 | 现行处置 |
+### 22.4 组件清单（随用随建，禁止预放）
+
+最小集合（v0.1 起步子集）：PButton、PIcon（内联 SVG 索引）、PInput、PSelect、PChip、PStatusPill、PDot、PField（label+控件+hint）、PCommandPreview（$ + 命令）、PEmptyState（四要素）、PTaskDrawer（两态）、PDangerDialog（三条件确认）、PFormDialog、PServiceCard、PSiteTable、PModalShell（Esc/遮罩/拖拽手柄）、PSidebarNav、PSummaryBar。其余（PTextarea/PCheckbox/PSlider/PPathButton/PToastItem/PKeyValue…）在对应功能落地时同步建。
+
+规则：**页面禁止重新发明清单内组件**；清单外组件"用到才建"，建时先查本规约 §20 流程。
+
+### 22.5 组件测试（分级，v2.2 裁剪）
+
+| 组件级别 | 测试要求 |
+| --- | --- |
+| 核心交互组件（PTaskDrawer/PDangerDialog/PFormDialog/PSiteTable） | Vitest 必须覆盖：Props 变体、Events 触发、禁用逻辑 |
+| 展示型组件（PChip/PStatusPill/PDot…） | 按需（渲染断言即可） |
+| 三平台视觉回归 | **推迟到 v1.0 应用稳定后**引入（Playwright 截图基线），禁止在 v0.1 建基线 |
+
+禁止：跳过核心组件测试；禁止为装饰性组件写形式化测试。
+
+## 23. 跨平台一致性（v2.2：三级模型）
+
+### 23.1 一致性级别（三级模型，优于平铺规则）
+
+| 级别 | 说明 | 处理 |
 | --- | --- | --- |
-| emoji 渲染 | 三平台字体不同 | §4.6 豁免：仅服务线标识可用 |
-| 滚动条 | WebKit/Chromium 均支持 ::-webkit-scrollbar | 已统一自定义 |
-| backdrop-filter | WebKit 需 -webkit- 前缀 | 前缀规则（§22.2-1） |
-| File System Access API | 仅 Chromium（WebView2 ✓，WebKit ✗） | §11 降级链：webkitdirectory → 原生对话框 |
-| 原生对话框/通知/托盘 | 仅桌面版 | §13 平台差异表 |
+| L1 强一致 | 三平台必须完全一致 | 视觉、布局、交互流程、逻辑快捷键 |
+| L2 惯例一致 | 遵循平台惯例，允许差异 | 窗口控制位置、菜单栏、托盘交互细节 |
+| L3 能力降级 | 平台不支持 → 显式降级 | §13 平台差异表 |
 
-### 22.3 与 Naive UI 的主题同源（强制）
+默认原则：除非平台惯例强制，一律 L1。
 
-- `n-config-provider` 的 theme-overrides **必须从 CSS 变量派生**（挂载时 getComputedStyle 读取 + 主题切换时重读），保证 6 主题下 Naive 组件与自定义组件永远同色。
-- 禁止在组件内硬编码 Naive 主题色；禁止绕过 n-config-provider 直接改 Naive 内部样式。
+### 23.2 视觉一致性（L1）
 
-### 22.4 验收
+- 颜色：6 主题三平台渲染一致（sRGB）
+- **字重规范化**：只允许 400/500/600/700（原型的 550/620/640 中间字重三平台静态字体就近取整、渲染不一致——已全量归一）
+- 字号：绝对 px（桌面 WebView 无浏览器缩放语义）；大屏缩放经 §5.4 断点对 CSS 变量覆盖实现
+- 圆角/阴影/动效时长：三平台统一；图标内联 SVG
+- 字体栈固定（§4.4），禁组件覆盖 font-family、禁网络字体、中文禁 fallback 到衬线
+- 滚动条：::-webkit-scrollbar 全局覆盖为常驻 9px（三引擎均支持）
 
-新增/修改公共组件的 PR 必须附：三平台截图（或 CI 视觉回归通过）、props/emits 文档、至少一个消费视图示例。不满足不合并。
+### 23.3 交互一致性（L1）与焦点管理
 
----
+同一操作三平台步骤/反馈/结果完全一致（开域名/开目录/拖拽/双击重置/危险确认/输入不匹配禁用）。焦点管理（补此前空缺）：打开弹窗 → 焦点自动进第一个可交互元素；关闭 → 焦点归还触发元素；Tab 按 DOM 顺序、禁跳出；**必须实现焦点陷阱**；可见焦点轮廓 `outline: 2px solid var(--accent)`。
+
+### 23.4 快捷键映射（逻辑键与物理键分离）
+
+```typescript
+// composables/useShortcut.ts —— 业务只写逻辑名，平台映射在此
+const mod = isMac() ? 'meta' : 'ctrl'
+```
+
+| 逻辑键 | macOS | Windows/Linux |
+| --- | --- | --- |
+| 命令面板 | ⌘K | Ctrl+K |
+| 同步状态 | ⌘R | Ctrl+R |
+| 跳转面板 | ⌘1..9 | Ctrl+1..9 |
+| 最小化到托盘 | ⌘W | Ctrl+W |
+| 退出 | ⌘Q | Alt+F4 |
+
+约束：禁止业务代码写 if (isMac)。
+
+### 23.5 系统集成抽象（PlatformAPI）
+
+```typescript
+export interface PlatformAPI {
+  openPath(path: string): Promise<void>
+  selectDirectory(): Promise<string | null>
+  saveFile(opts: SaveFileOptions): Promise<string | null>
+  openExternal(url: string): Promise<void>
+  showNotification(opts: NotificationOptions): Promise<void>
+  getSystemLocale(): Promise<string>
+  getPlatform(): 'darwin' | 'win32' | 'linux'
+}
+```
+
+约束：组件禁止直接 window.open / showDirectoryPicker 等；全部经 PlatformAPI；浏览器模式提供 mock（自动降级并 Toast 说明）。
+
+### 23.6 窗口控制（L2 惯例）
+
+macOS 窗口按钮左上/菜单栏系统顶部；Windows/Linux 右上。Wails v3 已处理窗口装饰，前端不自绘窗口控制按钮、不模拟系统按钮；内容区 padding 按需为 macOS 预留。
+
+### 23.7 多语言与构建一致性
+
+日期/数字/大小一律 Intl；排序用 Intl.Collator；禁 navigator.language 直接决定格式（必须用 i18n store locale）。构建：三平台统一 Vite；package-lock.json 入仓 + npm ci；.nvmrc 锁 Node；环境变量经 Vite define 注入；输出 dist/；图标 build/appicon.png 共用。
+
+## 24. 设计 Token（v2.2 校准：语义层强制，原始色阶层不建）
+
+- 组件**只准用语义 Token**（--accent/--ok/--warn/--danger/--surface*/--text*…）与组件 Token；禁止硬编码色值/尺寸（SVG 自身除外）。
+- 主题切换 = 语义 Token 值整体切换（[data-theme] 块），禁止组件内分支。
+- 原始色阶层（--p-color-blue-500 式 50–900 色阶）**不建**：6 主题 × ~15 语义 token 已覆盖，需扩展色阶时先过 §20 流程。
+- 命名沿用现有变量体系（--accent 等已入库形态），不迁移 --p-* 前缀——避免无收益的全量改名。
+
+## 25. 组件变更纪律（v2.2：替代外部草案的治理体系）
+
+1. 组件变更先改本文档对应条目（理由随行），再改组件，带测试。
+2. 公共组件的行为变更必须在 PR/提交说明中列出影响视图。
+3. **不设冻结清单、不设组件级 ADR、不设每组件 README**——理由：单人本地工具，组件级治理的成本超过其防止的事故；防回归由 §22.5 测试与 parity 承担。
+
+（原外部草案 §25 的冻结清单/组件 ADR/README+CI 检查为本项目规模下的过度治理，拒绝采纳并记录理由。）
+
+## 26. CI 检查（v2.2：三 lint 采纳，视觉回归推迟）
+
+- `lint:tokens`：组件内硬编码色值/尺寸即失败
+- `lint:platform`：组件内直接 window.open/showDirectoryPicker 即失败
+- `lint:components`：命名/目录/SFC 顺序检查
+- 三平台视觉回归：**v1.0 后引入**（应用稳定后建基线，避免 v0.1 全量重录）
+
+## 27. 总纲（补充）
+
+任何 UI 都由同一套组件搭建，任何平台上的行为与视觉都完全一致（除平台惯例强制差异外）。新增页面不是写新代码，而是组合已有组件；新增组件不是随手创建，而是先改本规约。
 
 ## 附录 A：v2.0 相对 v1.0 的变更清单
 
@@ -814,10 +903,13 @@ i18n 同步要求：任何新增 UI 文案，必须在 zh-CN.json5 和 en-US.jso
 | §9.4 aria-modal / §19 无障碍 | 待 Vue 实现后验证 | ☐ 待验证 | — |
 | §10.2 可折叠规则预览 / Tab 缩进 | 待 Vue 实现后验证 | ☐ 待验证 | — |
 | §11 多语言全套 | 待 Vue 实现后验证 | ☐ 待验证 | — |
+
 ## 24. 修订记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
+| v2.1 | 2026-09-13 | §22 初版（紧凑） |
+| v2.2 | 2026-09-13 | §22–27 按项目规模校准：采纳分层/契约/三级一致性/焦点管理/PlatformAPI/三 lint；裁剪 atoms-molecules 目录、组件测试分级、视觉回归推迟 v1.0、Token 只建语义层；**拒绝 §25 治理体系**（冻结清单/组件 ADR/每组件 README+CI——单人本地工具成本超事故）；修正 L4 禁 Token 过严（改为可用布局 Token）；字重规范化 500/600/700（原型 550/620/640 归一） |
 | v1.0 | 2026-09-13 | 初版（外部草案采纳，含本仓 C1–C4 修正） |
 | v2.0 | 2026-09-13 | 外部重写版采纳：Wails v3 Beta / §6 托盘规格 / §11 多语言（变更清单见附录 A） |
 | v2.1 | 2026-09-13 | 新增 §22 统一组件化与跨平台一致性：组件三层架构与五条契约（单点实现/晋升制/禁平台检测）、六条跨平台一致性规则（WebView 引擎差异出处：Win=WebView2·mac=WKWebView·Linux=WebKitGTK）、已知平台差异清单显式化、Naive UI 主题同源强制、公共组件验收标准 |
