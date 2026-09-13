@@ -40,3 +40,4 @@ backups/*
 *.swp
 *.log
 .DS_Store
+docs/ui-preview/_debug.html
