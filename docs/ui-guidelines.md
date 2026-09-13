@@ -727,6 +727,58 @@ i18n 同步要求：任何新增 UI 文案，必须在 zh-CN.json5 和 en-US.jso
 
 看目录名就知道它属于哪条线，看颜色就知道它是什么状态，看按钮就知道下一步做什么，看 Toast 就知道刚才发生了什么，看语言就知道用户在哪，看托盘就知道服务是否健康。
 
+## 22. 统一组件化与跨平台一致性（v2.1 新增）
+
+### 22.1 组件化架构（强制）
+
+**组件三层，职责不越界**：
+
+| 层 | 位置 | 内容 | 规则 |
+| --- | --- | --- | --- |
+| 基础组件 | src/components/base/ | BaseButton / BaseChip / StatusPill / BaseModal / EmptyState / BaseField / LogViewer | 全项目唯一样式实现；包装 Naive UI 时必须透传主题 |
+| 业务组件 | src/components/ | ServiceCard / VersionCard / SiteRow / ConnectionDrawer / DiagnosePanel / BackupRow / OfflineTree | 只组合基础组件与 api 层数据 |
+| 视图 | src/views/ | 页面装配 | 禁止手写重复 UI 模式——出现即违反本条 |
+
+**组件契约（每条都可在 code review 中机械判定）**：
+
+1. 数据进、事件出：props 进 / defineEmits 出；组件内禁止直接调 src/api/（数据由视图层传入）。
+2. 组件内禁止平台检测（navigator.userAgent / process.platform 判断 = 违规）——平台差异只允许在 internal/platform 与 src/api 的降级链里（§13）。
+3. **单点实现**：同一 UI 模式（危险确认 / 空状态 / 连接抽屉 / 日志视图 / 伪静态弹窗）全项目只能有一个实现——openDangerConfirm 是先例，不是特例。
+4. **晋升制**（与引擎 internal/pkg 同构）：视图私有片段被第二次复用前保持私有，第二次复用时必须晋升为公共组件；禁止预放。
+5. 公共组件必须带类型化 defineProps / defineEmits / 插槽注释（props 含义、事件载荷结构）。
+
+### 22.2 跨平台一致性（强制）
+
+**WebView 引擎事实**：Windows = WebView2（Chromium）；macOS = WKWebView（WebKit）；Linux = WebKitGTK（WebKit）。三引擎渲染差异是所有一致性规则的出处。
+
+**六条一致性规则**：
+
+1. **单一 CSS 源**：全项目只有一份样式；平台分支只允许 `-webkit-` 前缀（如 `-webkit-backdrop-filter`）与 `@supports` 查询，禁止按 UA 写不同样式表。
+2. **原生控件一律接管**：select / checkbox / 滚动条 已按 `appearance: none` + 自定义样式实现（含 `::-webkit-scrollbar`），禁止裸用浏览器默认外观。
+3. **字体只用 §4.4 栈**：禁止按平台加载不同字体文件；字号 px 定义（三引擎渲染差异用断点吸收，不用 em/rem 补偿）。
+4. **格式化只走 Intl**（§11.7）：日期/数字/文件大小禁止手写拼接——三引擎的 `toLocaleString` 默认输出不同。
+5. **平台能力只经两层出口**：绑定层（桌面能力）与 src/api 降级链（浏览器能力）；组件与视图层出现平台 if/else = 违规。
+6. **视觉回归**：CI 三平台矩阵对 关键视图 × 全部主题 截图比对（感知哈希阈值容差）；新增公共组件必须附三平台截图。
+
+**已知平台差异清单**（显式记录，禁止隐性分歧）：
+
+| 差异 | 事实 | 现行处置 |
+| --- | --- | --- |
+| emoji 渲染 | 三平台字体不同 | §4.6 豁免：仅服务线标识可用 |
+| 滚动条 | WebKit/Chromium 均支持 ::-webkit-scrollbar | 已统一自定义 |
+| backdrop-filter | WebKit 需 -webkit- 前缀 | 前缀规则（§22.2-1） |
+| File System Access API | 仅 Chromium（WebView2 ✓，WebKit ✗） | §11 降级链：webkitdirectory → 原生对话框 |
+| 原生对话框/通知/托盘 | 仅桌面版 | §13 平台差异表 |
+
+### 22.3 与 Naive UI 的主题同源（强制）
+
+- `n-config-provider` 的 theme-overrides **必须从 CSS 变量派生**（挂载时 getComputedStyle 读取 + 主题切换时重读），保证 6 主题下 Naive 组件与自定义组件永远同色。
+- 禁止在组件内硬编码 Naive 主题色；禁止绕过 n-config-provider 直接改 Naive 内部样式。
+
+### 22.4 验收
+
+新增/修改公共组件的 PR 必须附：三平台截图（或 CI 视觉回归通过）、props/emits 文档、至少一个消费视图示例。不满足不合并。
+
 ---
 
 ## 附录 A：v2.0 相对 v1.0 的变更清单
@@ -762,3 +814,10 @@ i18n 同步要求：任何新增 UI 文案，必须在 zh-CN.json5 和 en-US.jso
 | §9.4 aria-modal / §19 无障碍 | 待 Vue 实现后验证 | ☐ 待验证 | — |
 | §10.2 可折叠规则预览 / Tab 缩进 | 待 Vue 实现后验证 | ☐ 待验证 | — |
 | §11 多语言全套 | 待 Vue 实现后验证 | ☐ 待验证 | — |
+## 24. 修订记录
+
+| 版本 | 日期 | 变更 |
+| --- | --- | --- |
+| v1.0 | 2026-09-13 | 初版（外部草案采纳，含本仓 C1–C4 修正） |
+| v2.0 | 2026-09-13 | 外部重写版采纳：Wails v3 Beta / §6 托盘规格 / §11 多语言（变更清单见附录 A） |
+| v2.1 | 2026-09-13 | 新增 §22 统一组件化与跨平台一致性：组件三层架构与五条契约（单点实现/晋升制/禁平台检测）、六条跨平台一致性规则（WebView 引擎差异出处：Win=WebView2·mac=WKWebView·Linux=WebKitGTK）、已知平台差异清单显式化、Naive UI 主题同源强制、公共组件验收标准 |
