@@ -470,22 +470,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 
       <div class="brand-logo">π</div>
       <div class="brand-meta">
         <div class="brand-name">phpbox</div>
-        <div class="brand-status"><span class="dot dot-ok"></span><span>引擎已连接</span></div>
+        <div class="brand-status"><span class="dot dot-ok"></span><span id="brand-connected">引擎已连接</span></div>
       </div>
     </div>
     <nav class="nav" id="nav"></nav>
     <div class="sidebar-foot">
       <button class="btn-ghost" id="cmd-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        <span>命令面板</span>
+        <span data-foot="palette">命令面板</span>
       </button>
       <button class="btn-ghost" id="refresh-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
-        <span>同步状态</span>
+        <span data-foot="sync">同步状态</span>
       </button>
       <button class="btn-ghost" id="theme-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-        <span>切换主题</span>
+        <span data-foot="theme">切换主题</span>
       </button>
     </div>
     <div class="sidebar-resizer" id="sidebar-resizer" title="拖拽调整宽度（双击重置）"></div>
@@ -520,7 +520,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 
   </main>
 </div>
 
-<div class="modal-root" id="modal-root"></div>
+<div class="modal-root" id="modal-root" role="dialog" aria-modal="true" aria-label="phpbox 对话框"></div>
 
 <div class="cmd-palette" id="cmd-palette">
   <div class="cmd-palette-box">
@@ -543,9 +543,9 @@ const LAYOUT_LIMITS = {
 };
 
 const LAYOUT_PRESETS = {
-  compact: { sidebar: 200, drawer: 160, label: '紧凑', desc: '小屏笔记本' },
-  default: { sidebar: 232, drawer: 220, label: '标准', desc: '默认' },
-  wide:    { sidebar: 280, drawer: 320, label: '宽屏', desc: '大显示器' },
+  compact: { sidebar: 200, drawer: 160, label: { 'zh-CN': '紧凑', 'en-US': 'Compact' }, desc: '小屏笔记本' },
+  default: { sidebar: 232, drawer: 220, label: { 'zh-CN': '标准', 'en-US': 'Standard' }, desc: '默认' },
+  wide:    { sidebar: 280, drawer: 320, label: { 'zh-CN': '宽屏', 'en-US': 'Wide' }, desc: '大显示器' },
 };
 
 const layout = {
@@ -821,21 +821,82 @@ const SVC_META = {
 };
 
 const NAV = [
-  { section:'业务' },
+  { section:'business' },
   { id:'sites',   label:'站点',       icon:'🔗' },
-  { section:'服务' },
+  { section:'services' },
   { id:'php',     label:'PHP',        icon:'🐘' },
   { id:'mysql',   label:'MySQL',      icon:'🐬' },
   { id:'pgsql',   label:'PostgreSQL', icon:'🐘' },
   { id:'redis',   label:'Redis',      icon:'⚡' },
   { id:'nginx',   label:'Nginx',      icon:'🌐' },
   { id:'go',      label:'Go',         icon:'🐹' },
-  { section:'运维' },
+  { section:'ops' },
   { id:'backup',  label:'备份恢复',   icon:'📦' },
   { id:'offline', label:'离线缓存',   icon:'🗄️' },
   { id:'settings',label:'设置',       icon:'⚙️' },
   { id:'overview',label:'总览',       icon:'◈' },
 ];
+
+/* ─── i18n（规约 §11）：演示覆盖 nav/设置/页脚/标题；全量随 Vue 前端落地 ─── */
+const LOCALES = {
+  'zh-CN': {
+    'nav.business':'业务','nav.services':'服务','nav.ops':'运维',
+    'nav.sites':'站点','nav.backup':'备份恢复','nav.offline':'离线缓存','nav.settings':'设置','nav.overview':'总览',
+    'brand.connected':'引擎已连接',
+    'foot.palette':'命令面板','foot.sync':'同步状态','foot.theme':'切换主题',
+    'settings.title':'设置',
+    'settings.sub':'修改写入 .env · 标注"需重装生效"的项需要重新安装对应服务',
+    'settings.save':'保存修改',
+    'settings.layout':'布局','settings.hint.immediate':'即时生效',
+    'settings.presets':'预设档案','settings.presetsHint':'选择预设会把下方两项切换为该组合的数值。',
+    'settings.reset':'重置','settings.sidebarWidth':'侧边栏宽度','settings.drawerHeight':'日志面板高度',
+    'settings.paths':'路径','settings.hint.reinstall':'需重装生效','settings.ports':'端口','settings.go':'Go',
+    'settings.appearance':'外观','settings.language':'语言','settings.browse':'浏览',
+    'theme.midnight':'午夜蓝','theme.light':'晨光白','theme.oled':'极夜黑',
+    'theme.forest':'森林绿','theme.ocean':'深海蓝','theme.sakura':'樱花粉',
+  },
+  'en-US': {
+    'nav.business':'Business','nav.services':'Services','nav.ops':'Operations',
+    'nav.sites':'Sites','nav.php':'PHP','nav.mysql':'MySQL','nav.pgsql':'PostgreSQL','nav.redis':'Redis','nav.nginx':'Nginx','nav.go':'Go','nav.backup':'Backups','nav.offline':'Offline Cache','nav.settings':'Settings','nav.overview':'Overview',
+    'brand.connected':'Engine connected',
+    'foot.palette':'Command Palette','foot.sync':'Sync State','foot.theme':'Theme',
+    'settings.title':'Settings',
+    'settings.sub':'Changes are written to .env · items marked "reinstall required" need that service reinstalled',
+    'settings.save':'Save Changes',
+    'settings.layout':'Layout','settings.hint.immediate':'Immediate',
+    'settings.presets':'Presets','settings.presetsHint':'Picking a preset switches the two values below.',
+    'settings.reset':'Reset','settings.sidebarWidth':'Sidebar width','settings.drawerHeight':'Log panel height',
+    'settings.paths':'Paths','settings.hint.reinstall':'Reinstall required','settings.ports':'Ports','settings.go':'Go',
+    'settings.appearance':'Appearance','settings.language':'Language','settings.browse':'Browse',
+    'theme.midnight':'Midnight','theme.light':'Daylight','theme.oled':'OLED Black',
+    'theme.forest':'Forest','theme.ocean':'Deep Ocean','theme.sakura':'Sakura',
+  },
+};
+let locale = (() => {
+  const saved = localStorage.getItem('phpbox-locale');
+  if (saved && LOCALES[saved]) return saved;
+  if ((navigator.language || '').startsWith('en')) return 'en-US';
+  return 'zh-CN';
+})();
+function t(key) { return LOCALES[locale][key] ?? LOCALES['zh-CN'][key] ?? key; }
+function setLocale(l) {
+  if (!LOCALES[l] || l === locale) return;
+  locale = l;
+  localStorage.setItem('phpbox-locale', l);
+  document.documentElement.lang = l;
+  applyLocaleTexts();
+  renderNav(); render();
+}
+function applyLocaleTexts() {
+  document.documentElement.lang = locale;
+  const foot = { palette:'foot.palette', sync:'foot.sync', theme:'foot.theme' };
+  for (const [slot, key] of Object.entries(foot)) {
+    const span = document.querySelector(`[data-foot="${slot}"]`);
+    if (span) span.textContent = t(key);
+  }
+  const brand = document.querySelector('.brand-status span:last-child');
+  if (brand) brand.textContent = t('brand.connected');
+}
 
 /* 工具 */
 const $ = (s,r=document) => r.querySelector(s);
@@ -887,12 +948,12 @@ function applyTheme(id) {
 /* 导航 */
 function renderNav() {
   $('#nav').innerHTML = NAV.map(item => {
-    if (item.section) return `<div class="nav-section">${esc(item.section)}</div>`;
+    if (item.section) return `<div class="nav-section">${esc(t('nav.' + item.section))}</div>`;
     const count = countFor(item.id);
     const badge = count != null ? `<span class="nav-badge">${count}</span>` : '';
     return `<button class="nav-item ${state.route === item.id ? 'active' : ''}" data-route="${item.id}" title="${esc(item.label)}">
       <span class="nav-icon">${item.icon}</span>
-      <span>${item.label}</span>${badge}
+      <span>${esc(t('nav.' + item.id))}</span>${badge}
     </button>`;
   }).join('');
 }
@@ -913,6 +974,7 @@ function countFor(id) {
    ═══════════════════════════════════════════════════════ */
 function openDangerConfirm(opts) {
   const root = $('#modal-root');
+  root.dataset.danger = '1';
   const { title, description, warnings=[], cliPreview, confirmLabel='确认',
           confirmInput, checkbox, onConfirm } = opts;
   let inputMatched = !confirmInput, checked = !checkbox;
@@ -999,6 +1061,7 @@ function closeModal() {
   root.classList.remove('open');
   root.innerHTML = '';
   root.onkeydown = null;
+  delete root.dataset.danger;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1009,7 +1072,7 @@ function renderSites() {
 
   const header = `
     <header class="view-header">
-      <div><h1>站点</h1>
+      <div><h1>${esc(t("nav.sites"))}</h1>
         <p class="view-sub">点击域名打开 · 行内切换 PHP 版本 · 操作列可配置伪静态</p></div>
       <div class="header-actions">
         <button class="btn btn-primary" data-action="site-add">
@@ -1334,7 +1397,7 @@ function renderBackup() {
 
   return `<div class="view-inner">
     <header class="view-header">
-      <div><h1>备份恢复</h1><p class="view-sub">打包 .env、config/、离线缓存与数据卷 · 归档可直接下载到本地电脑</p></div>
+      <div><h1>${esc(t("nav.backup"))}</h1><p class="view-sub">打包 .env、config/、离线缓存与数据卷 · 归档可直接下载到本地电脑</p></div>
       <div class="header-actions">
         <button class="btn btn-primary" data-action="run-task" data-args="backup" data-label="创建备份">立即备份</button>
       </div>
@@ -1351,21 +1414,21 @@ function renderBackup() {
 
 function renderOffline() {
   const trees = state.offline.trees;
-  const rows = trees.map(t => `<tr>
-    <td><div class="svc-cell"><span class="svc-icon">${{php:'🐘',mysql:'🐬',pgsql:'🐘',redis:'⚡',nginx:'🌐'}[t.svc]||'📦'}</span>${t.svc}</div></td>
-    <td><span class="chip chip-accent">${esc(t.ver)}</span></td>
-    <td><span class="mono" style="color:var(--text-dim)">${esc(t.size)}</span></td>
-    <td><span class="mono" style="color:var(--text-mute)">${t.items}</span></td>
-    <td><span class="mono" style="color:var(--text-mute);font-size:12px">${esc(t.verified)}</span></td>
+  const rows = trees.map(th => `<tr>
+    <td><div class="svc-cell"><span class="svc-icon">${{php:'🐘',mysql:'🐬',pgsql:'🐘',redis:'⚡',nginx:'🌐'}[th.svc]||'📦'}</span>${th.svc}</div></td>
+    <td><span class="chip chip-accent">${esc(th.ver)}</span></td>
+    <td><span class="mono" style="color:var(--text-dim)">${esc(th.size)}</span></td>
+    <td><span class="mono" style="color:var(--text-mute)">${th.items}</span></td>
+    <td><span class="mono" style="color:var(--text-mute);font-size:12px">${esc(th.verified)}</span></td>
     <td><div class="row-actions">
-      <button class="btn btn-sm" data-action="run-task" data-args="offline,verify,${t.svc},${t.ver}" data-label="校验 ${t.svc} ${t.ver}">校验</button>
-      <button class="btn btn-sm btn-danger" data-action="offline-prune" data-svc="${t.svc}" data-ver="${t.ver}" data-size="${t.size}">清理</button>
+      <button class="btn btn-sm" data-action="run-task" data-args="offline,verify,${th.svc},${th.ver}" data-label="校验 ${th.svc} ${th.ver}">校验</button>
+      <button class="btn btn-sm btn-danger" data-action="offline-prune" data-svc="${th.svc}" data-ver="${th.ver}" data-size="${th.size}">清理</button>
     </div></td>
   </tr>`).join('');
 
   return `<div class="view-inner">
     <header class="view-header">
-      <div><h1>离线缓存</h1><p class="view-sub">安装命中缓存即零网络 · 断网重装全靠它</p></div>
+      <div><h1>${esc(t("nav.offline"))}</h1><p class="view-sub">安装命中缓存即零网络 · 断网重装全靠它</p></div>
       <div class="header-actions">
         <button class="btn" data-action="run-task" data-args="offline,verify" data-label="全部校验">全部校验</button>
       </div>
@@ -1389,22 +1452,22 @@ function renderSettings() {
   const layoutGroup = `
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <h3 style="font-size:14px;font-weight:600">布局</h3>
-        <span class="chip">即时生效</span>
+        <h3 style="font-size:14px;font-weight:600">${esc(t("settings.layout"))}</h3>
+        <span class="chip">${esc(t("settings.hint.immediate"))}</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div class="field">
-          <label>预设档案</label>
+          <label>${esc(t("settings.presets"))}</label>
           <div class="quick-picks" id="layout-presets">
             ${Object.entries(LAYOUT_PRESETS).map(([key, p]) =>
-              `<button class="pick layout-preset-btn" data-preset="${key}">${esc(p.label)}</button>`
+              `<button class="pick layout-preset-btn" data-preset="${key}">${esc(p.label[locale] || p.label)}</button>`
             ).join('')}
-            <button class="pick" id="layout-reset-btn">重置</button>
+            <button class="pick" id="layout-reset-btn">${esc(t("settings.reset"))}</button>
           </div>
-          <div class="hint">选择预设会把下方两项切换为该组合的数值。</div>
+          <div class="hint">${esc(t("settings.presetsHint"))}</div>
         </div>
         <div class="field">
-          <label>侧边栏宽度</label>
+          <label>${esc(t("settings.sidebarWidth"))}</label>
           <div class="slider-row">
             <input type="range" id="setting-sidebar-width"
                    min="${LAYOUT_LIMITS.sidebar.min}" max="${LAYOUT_LIMITS.sidebar.max}" step="2"
@@ -1413,7 +1476,7 @@ function renderSettings() {
           </div>
         </div>
         <div class="field">
-          <label>日志面板高度</label>
+          <label>${esc(t("settings.drawerHeight"))}</label>
           <div class="slider-row">
             <input type="range" id="setting-drawer-height"
                    min="${LAYOUT_LIMITS.drawer.min}" max="${LAYOUT_LIMITS.drawer.max}" step="2"
@@ -1425,13 +1488,13 @@ function renderSettings() {
     </div>`;
 
   const groups = [
-    { title:'路径', hint:'需重装生效', items:[
+    { title:t("settings.paths"), hint:t("settings.hint.reinstall"), items:[
       { key:'WWW_ROOT',        value:env.WWW_ROOT,        folder:true },
       { key:'MYSQL_DATA_ROOT', value:env.MYSQL_DATA_ROOT, folder:true },
       { key:'PGSQL_DATA_ROOT', value:env.PGSQL_DATA_ROOT, folder:true },
     ]},
-    { title:'端口', hint:'即时生效', items:[{ key:'NGINX_PORT', value:env.NGINX_PORT }]},
-    { title:'Go', hint:'即时生效', items:[
+    { title:t("settings.ports"), hint:t("settings.hint.immediate"), items:[{ key:'NGINX_PORT', value:env.NGINX_PORT }]},
+    { title:t("settings.go"), hint:t("settings.hint.immediate"), items:[
       { key:'GO_PROJECTS_ROOT',   value:env.GO_PROJECTS_ROOT,   folder:true },
       { key:'GO_DEFAULT_VERSION', value:env.GO_DEFAULT_VERSION },
       { key:'GO_PROXY',           value:env.GO_PROXY },
@@ -1455,7 +1518,7 @@ function renderSettings() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                   </svg>
-                  <span>浏览</span>
+                  <span>${esc(t("settings.browse"))}</span>
                 </button>
               ` : ''}
             </div>
@@ -1466,10 +1529,23 @@ function renderSettings() {
 
   return `<div class="view-inner">
     <header class="view-header">
-      <div><h1>设置</h1>
-        <p class="view-sub">修改写入 .env · 标注"需重装生效"的项需要重新安装对应服务</p></div>
-      <div class="header-actions"><button class="btn" id="settings-save">保存修改</button></div>
+      <div><h1>${esc(t("nav.settings"))}</h1>
+        <p class="view-sub">${esc(t("settings.sub"))}</p></div>
+      <div class="header-actions"><button class="btn" id="settings-save">${esc(t("settings.save"))}</button></div>
     </header>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="font-size:14px;font-weight:600">${esc(t("settings.appearance"))}</h3>
+        <span class="chip">${esc(t("settings.hint.immediate"))}</span>
+      </div>
+      <div class="field">
+        <label>${esc(t("settings.language"))}</label>
+        <select id="locale-select">
+          <option value="zh-CN"${locale === 'zh-CN' ? ' selected' : ''}>简体中文</option>
+          <option value="en-US"${locale === 'en-US' ? ' selected' : ''}>English (US)</option>
+        </select>
+      </div>
+    </div>
     ${layoutGroup}
     ${groupsHtml}
   </div>`;
@@ -1504,7 +1580,7 @@ function renderOverview() {
 
   return `<div class="view-inner">
     <header class="view-header">
-      <div><h1>总览</h1><p class="view-sub">所有服务实例一览</p></div>
+      <div><h1>${esc(t("nav.overview"))}</h1><p class="view-sub">所有服务实例一览</p></div>
       <div class="header-actions">
         <button class="btn" data-action="run-task" data-args="doctor" data-label="环境诊断">环境诊断</button>
       </div>
@@ -1664,7 +1740,7 @@ function openThemePicker() {
   let selected = state.theme;
 
   function build() {
-    return THEMES.map(t => `
+    return THEMES.map(th => `
       <div class="theme-card ${t.id === selected ? 'selected' : ''}" data-theme-id="${t.id}">
         <div class="theme-preview">
           <div class="theme-swatch theme-swatch-bg" style="background:${t.colors[0]}"></div>
@@ -1672,7 +1748,7 @@ function openThemePicker() {
           <div class="theme-swatch" style="background:${t.colors[2]}"></div>
           <div class="theme-swatch" style="background:${t.colors[3]}"></div>
         </div>
-        <div class="theme-name">${esc(t.name)}</div>
+        <div class="theme-name">${esc(t('theme.' + th.id))}</div>
         <div class="theme-desc">${esc(t.desc)}</div>
       </div>`).join('');
   }
@@ -2538,8 +2614,11 @@ function bindEvents() {
   });
 
   // 弹窗 / 命令面板遮罩
+  document.addEventListener('change', e => {
+    if (e.target.id === 'locale-select') setLocale(e.target.value);
+  });
   $('#modal-root').addEventListener('click', e => {
-    if (e.target.id === 'modal-root') closeModal();
+    if (e.target.id === 'modal-root' && e.currentTarget.dataset.danger !== '1') closeModal();
     if (e.target.closest('[data-modal-close]')) closeModal();
   });
   $('#cmd-palette').addEventListener('click', e => {
@@ -2588,6 +2667,8 @@ function initTheme() {
 
 function boot() {
   initTheme();
+  applyLocaleTexts();
+  document.documentElement.lang = locale;
   layout.load();
   setupSidebarResize();
   setupDrawerResize();
